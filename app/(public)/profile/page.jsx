@@ -3,8 +3,15 @@ import { auth } from "@/auth";
 import { getMyProfile } from "@/actions/customer/profile";
 import { getMySettings } from "@/actions/customer/settings";
 import { ProfilePageClient } from "@/components/website/ProfilePageClient";
+import { getTranslations } from "next-intl/server";
 
-export const metadata = { title: "Mon profil — Meri Beauty" };
+// Titre traduit selon la langue choisie (cookie NEXT_LOCALE) — MB-008.
+export async function generateMetadata() {
+  const t = await getTranslations("pageMeta");
+  return {
+    title: t("profileTitle"),
+  };
+}
 
 export default async function ProfilePage() {
   const session = await auth();

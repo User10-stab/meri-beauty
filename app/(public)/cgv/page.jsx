@@ -1,11 +1,16 @@
 import LegalPageLayout, { H2, H3, P, Ul, Note } from "@/components/website/LegalPageLayout";
 import Link from "next/link";
+import { getTranslations } from "next-intl/server";
 
-export const metadata = {
-  title: "Conditions générales de vente | Meri Beauty",
-  description: "Conditions générales de vente applicables aux commandes boutique, rendez-vous, ateliers et formations Meri Beauty.",
-  alternates: { canonical: "/cgv" },
-};
+// Titre traduit selon la langue choisie (cookie NEXT_LOCALE) — MB-008.
+export async function generateMetadata() {
+  const t = await getTranslations("pageMeta");
+  return {
+    title: t("cgvTitle"),
+    description: t("cgvDescription"),
+    alternates: { canonical: "/cgv" },
+  };
+}
 
 export default function CGVPage() {
   return (

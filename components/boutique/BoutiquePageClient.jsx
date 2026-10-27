@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { ChevronDown, Grid3x3, LayoutGrid, List, Search, SlidersHorizontal, X } from "lucide-react";
 import { getStorefrontProducts } from "@/actions/boutique/storefront";
 import { ProductCard } from "@/components/boutique/ProductCard";
+import { STOREFRONT_PAGE_SIZE } from "@/lib/boutique/storefront-pagination";
 import { useTranslations } from "next-intl";
 
 const SORT_OPTIONS = [
@@ -48,9 +49,18 @@ function FilterSection({ title, isOpen, onToggle, toggleLabel, children }) {
   );
 }
 
-export function BoutiquePageClient({ initialProducts, categories, brands }) {
+export function BoutiquePageClient({ initialProducts, initialTotal, categories, brands }) {
   const t = useTranslations("boutique");
   const [products, setProducts] = useState(initialProducts);
+  // Nombre total de produits correspondant aux filtres (et non le nombre de
+  // cartes affichées) : seule une page de STOREFRONT_PAGE_SIZE est chargée à
+  // la fois, le reste arrive via « Voir plus ».
+  const [total, setTotal] = useState(initialTotal ?? initialProducts.length);
+  const [loadingMore, setLoadingMore] = useState(false);
+  // Chaque nouvelle recherche/filtre incrémente ce compteur : une réponse
+  // « Voir plus » partie avant le changement de filtre est ignorée au lieu
+  // d'ajouter des produits de l'ancienne sélection à la nouvelle.
+  const requestIdRef = useRef(0);
   const [search, setSearch] = useState("");
   const [categorySlug, setCategorySlug] = useState(null);
   const [subcategorySlug, setSubcategorySlug] = useState(null);
@@ -111,19 +121,55 @@ export function BoutiquePageClient({ initialProducts, categories, brands }) {
     return [...groups.values()];
   }, [categories]);
 
+  // Recharge la PREMIÈRE page pour la sélection donnée (filtres/recherche/tri).
+  function loadFirstPage(params) {
+    const requestId = ++requestIdRef.current;
+    setLoadingMore(false);
+    startTransition(async () => {
+      const result = await getStorefrontProducts({ ...params, offset: 0, limit: STOREFRONT_PAGE_SIZE });
+      if (requestId !== requestIdRef.current) return;
+      setProducts(result.data ?? []);
+      setTotal(result.total ?? result.data?.length ?? 0);
+    });
+  }
+
   function refetch(next) {
-    const params = {
+    loadFirstPage({
       search: next.search ?? search,
       categorySlug: next.categorySlug !== undefined ? next.categorySlug : categorySlug,
       subcategorySlug: next.subcategorySlug !== undefined ? next.subcategorySlug : subcategorySlug,
       brandId: next.brandId !== undefined ? next.brandId : brandId,
       sort: next.sort ?? sort,
-    };
-    startTransition(async () => {
-      const result = await getStorefrontProducts(params);
-      setProducts(result.data ?? []);
     });
   }
+
+  // Page suivante avec les filtres EN COURS, ajoutée à la suite des cartes.
+  async function loadMore() {
+    if (loadingMore) return;
+    const requestId = requestIdRef.current;
+    setLoadingMore(true);
+    try {
+      const result = await getStorefrontProducts({
+        search,
+        categorySlug,
+        subcategorySlug,
+        brandId,
+        sort,
+        offset: products.length,
+        limit: STOREFRONT_PAGE_SIZE,
+      });
+      if (requestId !== requestIdRef.current) return;
+      setProducts((prev) => {
+        const seen = new Set(prev.map((p) => p.id));
+        return [...prev, ...(result.data ?? []).filter((p) => !seen.has(p.id))];
+      });
+      if (typeof result.total === "number") setTotal(result.total);
+    } finally {
+      if (requestId === requestIdRef.current) setLoadingMore(false);
+    }
+  }
+
+  const hasMore = products.length < total;
 
   function handleSearchSubmit(e) {
     e.preventDefault();
@@ -170,10 +216,7 @@ export function BoutiquePageClient({ initialProducts, categories, brands }) {
     setSubcategorySlug(null);
     setBrandId(null);
     setSort("newest");
-    startTransition(async () => {
-      const result = await getStorefrontProducts({});
-      setProducts(result.data ?? []);
-    });
+    loadFirstPage({});
   }
 
   const hasActiveFilters = Boolean(search || categorySlug || subcategorySlug || brandId);
@@ -373,7 +416,7 @@ export function BoutiquePageClient({ initialProducts, categories, brands }) {
             {/* Results bar: count + active-filter chips */}
             <div className="mb-6 flex flex-wrap items-center gap-2.5">
               <span className={`text-sm ${isPending ? "text-gray-300" : "text-gray-500"}`}>
-                {t("productCount", { count: products.length })}
+                {t("productCount", { count: total })}
               </span>
               {activeChips.map((chip) => (
                 <button
@@ -421,6 +464,22 @@ export function BoutiquePageClient({ initialProducts, categories, brands }) {
                       variant={view === "list" ? "list" : "grid"}
                     />
                   ))}
+                </div>
+              )}
+
+              {products.length > 0 && hasMore && (
+                <div className="mt-12 flex flex-col items-center gap-3">
+                  <p className="text-xs text-gray-400" aria-live="polite">
+                    {t("shownOf", { shown: products.length, total })}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={loadMore}
+                    disabled={loadingMore || isPending}
+                    className="border border-[#2F3A2E] px-8 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-[#2F3A2E] transition-colors hover:bg-[#2F3A2E] hover:text-[#F8F6F2] disabled:opacity-50"
+                  >
+                    {t("loadMore")}
+                  </button>
                 </div>
               )}
             </div>

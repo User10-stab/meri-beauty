@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Store, Wallet, Truck, Check, Loader2, AlertTriangle, CheckCircle2, BadgeCheck, BadgeX, ShieldQuestion } from "lucide-react";
 import { toast } from "sonner";
+import { useLocale, useTranslations } from "next-intl";
 import { createOrderFromCart, createOrderCheckoutSession } from "@/actions/boutique/orders";
 import { getCartShippingCost, requestShippingQuote } from "@/actions/boutique/shipping";
 import { checkEmailExists } from "@/actions/shared/check-email-exists";
@@ -17,28 +18,16 @@ import { isDisposableEmail } from "@/lib/validations/customer-identity";
 import { validatePassword } from "@/lib/validations/password";
 import { resolveGoodsVatPolicy, hasReusableVatValidation, applyVatRate, roundMoney, BELGIUM_VAT_RATE, VAT_LEGAL_NOTES } from "@/lib/tax-policy";
 
-const MODES = [
-  {
-    value: "PICKUP_PREPAID",
-    icon: Store,
-    title: "Retrait en boutique — payer en ligne",
-    description: "Payez maintenant, récupérez votre commande au salon.",
-  },
-  {
-    value: "PICKUP_ON_SITE",
-    icon: Wallet,
-    title: "Retrait en boutique — payer sur place",
-    description: "Réservez maintenant, réglez en boutique au retrait (sous 7 jours).",
-  },
-  {
-    value: "SHIPPING_PREPAID",
-    icon: Truck,
-    title: "Livraison en point relais",
-    description: "Payez maintenant, livraison Mondial Relay. Frais de port calculés au poids — gratuite dès €150.",
-  },
-];
+const MODES = ["PICKUP_PREPAID", "PICKUP_ON_SITE", "SHIPPING_PREPAID"].map((value) => ({
+  value,
+  icon: value === "PICKUP_PREPAID" ? Store : value === "PICKUP_ON_SITE" ? Wallet : Truck,
+}));
 
 export function CheckoutPageClient({ cart, customerSession, shippingEnabled = true }) {
+  const t = useTranslations("boutique");
+  const locale = useLocale();
+  const lang = locale === "nl" ? "nl" : locale === "en" ? "en" : "fr";
+  const text = useCallback((fr, en, nl) => ({ fr, en, nl })[lang], [lang]);
   const router = useRouter();
   const effectiveSession = customerSession;
   const isAuthenticated = Boolean(effectiveSession);
@@ -131,7 +120,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
 
   async function handleVerifyVat() {
     if (!customerInfo.vatNumber?.trim()) {
-      toast.error("Renseignez d'abord un numéro de TVA.");
+      toast.error(text("Renseignez d'abord un numéro de TVA.", "Enter a VAT number first.", "Vul eerst een btw-nummer in."));
       return;
     }
 
@@ -146,9 +135,9 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
       valid: result.valid,
       message: result.valid
         ? result.name
-          ? `Actif — enregistré au nom de « ${result.name} ».`
-          : "Actif dans le registre VIES."
-        : "Ce numéro n'est pas reconnu par le registre européen VIES.",
+          ? text(`Actif — enregistré au nom de « ${result.name} ».`, `Active — registered under « ${result.name} ».`, `Actief — geregistreerd op naam van « ${result.name} ».`)
+          : text("Actif dans le registre VIES.", "Active in the VIES register.", "Actief in het VIES-register.")
+        : text("Ce numéro n'est pas reconnu par le registre européen VIES.", "This number is not recognized by the European VIES register.", "Dit nummer is niet erkend door het Europese VIES-register."),
     });
     if (result.valid) {
       setSavedVatProfile({ isCompany: true, vatNumber: customerInfo.vatNumber, vatValidatedAt: new Date().toISOString() });
@@ -279,17 +268,17 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
     if (vatPreview.taxNote === VAT_LEGAL_NOTES.FOREIGN_EU_B2B_ZERO) {
       return {
         tone: "good",
-        text: "TVA à 0% appliquée — autoliquidation.",
+        text: text("TVA à 0% appliquée — autoliquidation.", "0% VAT applied — reverse charge.", "0% btw toegepast — verlegging van heffing."),
       };
     }
     if (!customerInfo.vatNumber?.trim()) {
-      return { tone: "info", text: "Ajoutez un numéro de TVA UE puis vérifiez-le auprès de VIES. Sans validation VIES, la TVA à 21% reste appliquée." };
+      return { tone: "info", text: text("Ajoutez un numéro de TVA UE puis vérifiez-le auprès de VIES. Sans validation VIES, la TVA à 21% reste appliquée.", "Add an EU VAT number and verify it with VIES. Without VIES validation, 21% VAT remains applicable.", "Voeg een EU-btw-nummer toe en verifieer het via VIES. Zonder VIES-validatie blijft 21% btw van toepassing.") };
     }
     return {
       tone: "info",
-      text: "La TVA à 21% reste appliquée. Le taux de 0% exige un numéro de TVA actif, validé par VIES et délivré par un autre pays de l’Union européenne.",
+      text: text("La TVA à 21% reste appliquée. Le taux de 0% exige un numéro de TVA actif, validé par VIES et délivré par un autre pays de l’Union européenne.", "21% VAT remains applicable. The 0% rate requires an active VAT number, validated by VIES and issued by another European Union country.", "21% btw blijft van toepassing. Het 0%-tarief vereist een actief btw-nummer, gevalideerd door VIES en uitgegeven door een ander land van de Europese Unie."),
     };
-  }, [vatPreview, customerInfo.vatNumber]);
+  }, [vatPreview, customerInfo.vatNumber, text]);
 
   function handleCustomerChange(e) {
     const { name, value, type, checked } = e.target;
@@ -305,41 +294,41 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
     e.preventDefault();
 
     if (!fulfilmentMode) {
-      toast.error("Veuillez choisir un mode de retrait.");
+      toast.error(t("checkout.errors.selectMode"));
       return;
     }
     if (!shippingEnabled && fulfilmentMode === "SHIPPING_PREPAID") {
-      toast.error("La livraison est temporairement indisponible. Choisissez le retrait en boutique.");
+      toast.error(text("La livraison est temporairement indisponible. Choisissez le retrait en boutique.", "Delivery is temporarily unavailable. Please choose in-store pickup.", "Bezorging is tijdelijk niet beschikbaar. Kies voor afhalen in de winkel."));
       return;
     }
     if (quoteRequired) {
-      toast.error("Votre commande dépasse 30 kg. Contactez-nous pour un devis de livraison personnalisé.");
+      toast.error(t("checkout.errors.overweight"));
       return;
     }
     if (!acceptedTerms) {
-      toast.error("Veuillez accepter les CGV et la politique de confidentialité.");
+      toast.error(t("checkout.errors.acceptTerms"));
       return;
     }
     if (!isAuthenticated) {
       if (!customerInfo.fullName.trim() || !customerInfo.email.trim() || !customerInfo.phone.trim()) {
-        toast.error("Veuillez compléter vos informations de contact.");
+        toast.error(t("checkout.errors.completeInfo"));
         return;
       }
       if (isDisposableEmail(customerInfo.email)) {
-        toast.error("Les adresses e-mail temporaires ne sont pas acceptées.");
+        toast.error(t("checkout.errors.disposableEmail"));
         return;
       }
       if (emailStatus === "exists") {
-        toast.error("Cette adresse e-mail est déjà associée à un compte. Connectez-vous ci-dessus pour continuer.");
+        toast.error(t("checkout.errors.accountExists"));
         return;
       }
       if (validatePassword(customerInfo.password)) {
-        toast.error("Veuillez choisir un mot de passe d'au moins 8 caractères.");
+        toast.error(text("Veuillez choisir un mot de passe d'au moins 8 caractères.", "Choose a password with at least 8 characters.", "Kies een wachtwoord van minstens 8 tekens."));
         return;
       }
     }
     if (customerInfo.isCompany && !hasSavedVatProof && !customerInfo.vatNumber?.trim()) {
-      toast.error("Veuillez indiquer votre numéro de TVA, ou repasser sur « Particulier ».");
+      toast.error(text("Veuillez indiquer votre numéro de TVA, ou repasser sur « Particulier ».", "Enter your VAT number or switch back to “Individual”.", "Vul uw btw-nummer in of kies opnieuw voor ‘Particulier’."));
       return;
     }
     // Only an Entreprise order gets a real invoice (a particulier gets a
@@ -350,13 +339,13 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
     // chance to catch it before the button below charges Stripe.
     if (customerInfo.isCompany && !hasAddressOnFile) {
       if (!customerInfo.addressLine1.trim() || !customerInfo.addressCity.trim() || !customerInfo.addressPostalCode.trim()) {
-        toast.error("Veuillez indiquer votre adresse de facturation — elle est obligatoire pour la facture d'entreprise.");
+        toast.error(text("Veuillez indiquer votre adresse de facturation — elle est obligatoire pour la facture d'entreprise.", "Enter your billing address — it is required for a business invoice.", "Vul uw factuuradres in — dit is verplicht voor een bedrijfsfactuur."));
         return;
       }
     }
     if (fulfilmentMode === "SHIPPING_PREPAID") {
       if (!pickupPoint?.name?.trim() || !pickupPoint?.city?.trim() || !isValidPickupPostalCode(pickupPoint?.postalCode, pickupPoint?.countryCode ?? "BE")) {
-        toast.error("Veuillez choisir un point relais Mondial Relay valide.");
+        toast.error(t("checkout.errors.selectRelay"));
         return;
       }
     }
@@ -423,7 +412,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
 
       const sessionResult = await createOrderCheckoutSession(result.data.orderId, result.data.checkoutToken);
       if (!sessionResult.success) {
-        toast.error(sessionResult.message || "Impossible de démarrer le paiement.");
+        toast.error(sessionResult.message || t("checkout.errors.paymentFailed"));
         setSubmitting(false);
         return;
       }
@@ -437,14 +426,14 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
       }
 
       if (!sessionResult.url) {
-        toast.error("Impossible de démarrer le paiement.");
+        toast.error(t("checkout.errors.paymentFailed"));
         setSubmitting(false);
         return;
       }
       window.location.href = sessionResult.url;
     } catch (error) {
       console.error("[CheckoutPageClient]", error);
-      toast.error("Une erreur est survenue. Veuillez réessayer.");
+      toast.error(t("checkout.errors.unexpectedError"));
       setSubmitting(false);
     }
   }
@@ -452,15 +441,15 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
   async function handleRequestQuote() {
     const info = isAuthenticated ? effectiveSession : customerInfo;
     if (!info?.fullName?.trim() || !info?.email?.trim() || !info?.phone?.trim()) {
-      toast.error("Veuillez compléter vos informations de contact.");
+      toast.error(t("checkout.errors.completeInfo"));
       return;
     }
     if (!isAuthenticated && isDisposableEmail(info.email)) {
-      toast.error("Les adresses e-mail temporaires ne sont pas acceptées.");
+      toast.error(t("checkout.errors.disposableEmail"));
       return;
     }
     if (!pickupPoint?.name?.trim() || !pickupPoint?.city?.trim() || !isValidPickupPostalCode(pickupPoint?.postalCode, pickupPoint?.countryCode ?? "BE")) {
-      toast.error("Veuillez choisir un point relais Mondial Relay valide.");
+      toast.error(t("checkout.errors.selectRelay"));
       return;
     }
 
@@ -487,7 +476,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
   // switch back to buying as an individual without dragging their VAT
   // number along.
   const companyToggle = (
-    <div role="radiogroup" aria-label="Type de compte" className="flex border border-neutral-200 p-1">
+    <div role="radiogroup" aria-label={text("Type de compte", "Account type", "Accounttype")} className="flex border border-neutral-200 p-1">
       <label
         className={`flex flex-1 cursor-pointer items-center justify-center px-3 py-2 text-xs font-semibold uppercase tracking-wide transition-colors ${
           !customerInfo.isCompany ? "bg-[#2F3A2E] text-white" : "text-gray-500 hover:text-[#2F3A2E]"
@@ -501,7 +490,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
           onChange={() => setCustomerInfo((prev) => ({ ...prev, isCompany: false }))}
           className="sr-only"
         />
-        Particulier
+        {text("Particulier", "Individual", "Particulier")}
       </label>
       <label
         className={`flex flex-1 cursor-pointer items-center justify-center px-3 py-2 text-xs font-semibold uppercase tracking-wide transition-colors ${
@@ -516,7 +505,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
           onChange={() => setCustomerInfo((prev) => ({ ...prev, isCompany: true }))}
           className="sr-only"
         />
-        Entreprise
+        {text("Entreprise", "Business", "Bedrijf")}
       </label>
     </div>
   );
@@ -524,7 +513,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
   const vatField = (
     <div className="space-y-2">
       <label className="block text-xs font-semibold uppercase tracking-[0.15em] text-[#2F3A2E]">
-        Numéro de TVA
+        {text("Numéro de TVA", "VAT number", "Btw-nummer")}
       </label>
       <div className="flex gap-2">
         <input
@@ -532,7 +521,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
           name="vatNumber"
           value={customerInfo.vatNumber ?? ""}
           onChange={handleCustomerChange}
-          placeholder="BE0123456789 ou FRXX123456789"
+          placeholder={text("BE0123456789 ou FRXX123456789", "BE0123456789 or FRXX123456789", "BE0123456789 of FRXX123456789")}
           className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
         />
         <button
@@ -542,7 +531,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
           className="inline-flex shrink-0 items-center gap-1.5 border border-neutral-200 px-3 text-xs font-semibold text-gray-600 transition-colors hover:border-[#C8A46A] hover:text-[#2F3A2E] disabled:opacity-50"
         >
           {vatCheck?.loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldQuestion className="h-3.5 w-3.5" />}
-          Vérifier
+          {text("Vérifier", "Verify", "Verifiëren")}
         </button>
       </div>
       {vatCheck && !vatCheck.loading && (
@@ -562,7 +551,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
         </p>
       )}
       <p className="text-xs text-gray-400">
-        Après validation, ce numéro sera réutilisé pendant 90 jours.
+        {text("Après validation, ce numéro sera réutilisé pendant 90 jours.", "After validation, this number will be reused for 90 days.", "Na validatie wordt dit nummer 90 dagen hergebruikt.")}
       </p>
     </div>
   );
@@ -575,7 +564,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
   const addressFields = (
     <div className="space-y-3 border-t border-neutral-100 pt-4">
       <p className="text-xs font-semibold uppercase tracking-[0.15em] text-[#2F3A2E]">
-        Adresse de facturation
+        {text("Adresse de facturation", "Billing address", "Factuuradres")}
       </p>
       <input
         type="text"
@@ -583,7 +572,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
         value={customerInfo.addressLine1}
         onChange={handleCustomerChange}
         autoComplete="address-line1"
-        placeholder="Rue et numéro"
+            placeholder={text("Rue et numéro", "Street and number", "Straat en huisnummer")}
         className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
       />
       <input
@@ -592,7 +581,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
         value={customerInfo.addressLine2}
         onChange={handleCustomerChange}
         autoComplete="address-line2"
-        placeholder="Boîte, étage, complément (optionnel)"
+        placeholder={text("Boîte, étage, complément (optionnel)", "Unit, floor, additional address info (optional)", "Bus, verdieping, toevoeging (optioneel)")}
         className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
       />
       <div className="grid grid-cols-3 gap-3">
@@ -602,7 +591,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
           value={customerInfo.addressPostalCode}
           onChange={handleCustomerChange}
           autoComplete="postal-code"
-          placeholder="Code postal"
+          placeholder={text("Code postal", "Postal code", "Postcode")}
           className="col-span-1 w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
         />
         <input
@@ -611,7 +600,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
           value={customerInfo.addressCity}
           onChange={handleCustomerChange}
           autoComplete="address-level2"
-          placeholder="Ville"
+          placeholder={text("Ville", "City", "Stad")}
           className="col-span-2 w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
         />
       </div>
@@ -622,11 +611,11 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
         autoComplete="country"
         className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
       >
-        <option value="BE">Belgique</option>
-        <option value="FR">France</option>
+        <option value="BE">{text("Belgique", "Belgium", "België")}</option>
+        <option value="FR">{text("France", "France", "Frankrijk")}</option>
         <option value="LU">Luxembourg</option>
-        <option value="NL">Pays-Bas</option>
-        <option value="DE">Allemagne</option>
+        <option value="NL">{text("Pays-Bas", "Netherlands", "Nederland")}</option>
+        <option value="DE">{text("Allemagne", "Germany", "Duitsland")}</option>
       </select>
     </div>
   );
@@ -638,22 +627,20 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
           <CheckCircle2 className="h-8 w-8 text-[#C8A46A]" />
         </div>
         <h1 className="text-2xl font-bold text-[#2F3A2E]">
-          {pendingVerificationEmailFailed ? "Commande enregistrée" : "Confirmez votre email"}
+          {pendingVerificationEmailFailed ? text("Commande enregistrée", "Order saved", "Bestelling opgeslagen") : text("Confirmez votre e-mail", "Confirm your email", "Bevestig uw e-mailadres")}
         </h1>
         {pendingVerificationEmailFailed ? (
           <p className="mx-auto mt-3 max-w-md text-ink/60 text-gray-500">
-            Votre commande est bien enregistrée, mais nous n&apos;avons pas pu envoyer l&apos;e-mail de confirmation à{" "}
-            <strong>{pendingVerificationEmail}</strong> tout de suite.{" "}
+            {text("Votre commande est bien enregistrée, mais nous n'avons pas pu envoyer l'e-mail de confirmation à", "Your order has been saved, but we could not send the confirmation email to", "Uw bestelling is opgeslagen, maar we konden de bevestigingsmail niet versturen naar")} {" "}
+            <strong>{pendingVerificationEmail}</strong>{" "}
             <Link href="/verify-email" className="font-semibold text-[#2F3A2E] underline hover:text-[#3d4d3c]">
-              Demandez un nouveau lien
+              {text("Demandez un nouveau lien", "Request a new link", "Vraag een nieuwe link aan")}
             </Link>{" "}
-            pour activer votre compte et finaliser votre paiement.
+            {text("pour activer votre compte et finaliser votre paiement.", "to activate your account and complete your payment.", "om uw account te activeren en uw betaling af te ronden.")}
           </p>
         ) : (
           <p className="mx-auto mt-3 max-w-md text-ink/60 text-gray-500">
-            Nous avons envoyé un lien de confirmation à <strong>{pendingVerificationEmail}</strong>. Cliquez dessus pour
-            activer votre compte — vous reviendrez directement ici pour finaliser votre paiement, avec le mot de passe
-            que vous venez de choisir.
+            {text("Nous avons envoyé un lien de confirmation à", "We have sent a confirmation link to", "We hebben een bevestigingslink gestuurd naar")} <strong>{pendingVerificationEmail}</strong>. {text("Cliquez dessus pour activer votre compte — vous reviendrez directement ici pour finaliser votre paiement, avec le mot de passe que vous venez de choisir.", "Click it to activate your account — you will return here to complete your payment with the password you just chose.", "Klik erop om uw account te activeren — u keert hier terug om uw betaling af te ronden met het wachtwoord dat u net hebt gekozen.")}
           </p>
         )}
       </div>
@@ -662,13 +649,13 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
 
   return (
     <div className="mx-auto max-w-[1000px] px-6 py-12 md:px-10">
-      <h1 className="mb-8 text-3xl text-[#2F3A2E]">Finaliser la commande</h1>
+      <h1 className="mb-8 text-3xl text-[#2F3A2E]">{t("checkout.title")}</h1>
 
       <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-10 lg:grid-cols-[1fr_320px]">
         <div className="space-y-8">
           {/* Fulfilment mode */}
           <section>
-            <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">Mode de retrait</h2>
+            <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">{t("checkout.fulfilmentMode")}</h2>
             <div className="space-y-3">
               {availableModes.map((mode) => {
                 const Icon = mode.icon;
@@ -690,8 +677,8 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
                       <Icon size={19} />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-[#2F3A2E]">{mode.title}</p>
-                      <p className="mt-0.5 text-sm text-gray-500">{mode.description}</p>
+                      <p className="text-sm font-semibold text-[#2F3A2E]">{t(`checkout.modes.${mode.value}.title`)}</p>
+                      <p className="mt-0.5 text-sm text-gray-500">{t(`checkout.modes.${mode.value}.description`)}</p>
                     </div>
                     {selected && <Check size={20} className="flex-shrink-0 text-[#C8A46A]" />}
                   </button>
@@ -704,7 +691,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
           {fulfilmentMode === "SHIPPING_PREPAID" && (
             <section className="border border-neutral-200 p-6">
               <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">
-                Point relais Mondial Relay
+                {t("checkout.mondialRelayTitle")}
               </h2>
               <MondialRelayPicker
                 value={pickupPoint}
@@ -718,7 +705,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
           {isAuthenticated && (
             <section className="border border-neutral-200 p-6 space-y-4">
               <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">
-                Facturation
+                {text("Facturation", "Billing", "Facturatie")}
               </h2>
               {companyToggle}
               {customerInfo.isCompany && (
@@ -727,10 +714,10 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
                     <div className="flex items-start gap-3 bg-emerald-50 px-4 py-3 text-emerald-800">
                       <BadgeCheck className="mt-0.5 h-4 w-4 shrink-0" />
                       <div className="text-sm">
-                        <p className="font-semibold">TVA {customerInfo.vatNumber} vérifiée</p>
+                        <p className="font-semibold">{text("Btw", "VAT", "Btw")} {customerInfo.vatNumber} {text("vérifiée", "verified", "geverifieerd")}</p>
                         <p className="mt-0.5 text-xs text-emerald-700">
-                          La validation VIES est réutilisée pendant 90 jours. Pour changer ce numéro, utilisez votre{" "}
-                          <Link href="/profile" className="underline underline-offset-2">profil</Link>.
+                          {text("La validation VIES est réutilisée pendant 90 jours. Pour changer ce numéro, utilisez votre", "The VIES validation is reused for 90 days. To change this number, use your", "De VIES-validatie wordt 90 dagen hergebruikt. Gebruik uw")} {" "}
+                          <Link href="/profile" className="underline underline-offset-2">{text("profil", "profile", "profiel")}</Link>.
                         </p>
                       </div>
                     </div>
@@ -749,22 +736,22 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
           {/* Customer info */}
           {!isAuthenticated && (
             <section className="border border-neutral-200 p-6">
-              <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">Vos informations</h2>
+              <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">{t("checkout.yourInfo")}</h2>
               <div className="space-y-4">
                 <p className="text-[13px] text-neutral-500">
-                  Vous avez déjà un compte ?{" "}
+                  {text("Vous avez déjà un compte ?", "Already have an account?", "Heeft u al een account?")}{" "}
                   <Link
                     href={`/login?callbackUrl=${encodeURIComponent("/boutique/checkout")}`}
                     className="font-semibold text-[#2F3A2E] underline decoration-[#C8A46A] underline-offset-2 transition-colors hover:text-[#C8A46A]"
                   >
-                    Se connecter
+                    {text("Se connecter", "Log in", "Inloggen")}
                   </Link>
                 </p>
                 <input
                   name="fullName"
                   value={customerInfo.fullName}
                   onChange={handleCustomerChange}
-                  placeholder="Nom complet"
+                  placeholder={t("checkout.fullName")}
                   className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
                   required
                 />
@@ -775,7 +762,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
                     value={customerInfo.email}
                     onChange={handleCustomerChange}
                     onBlur={handleEmailBlur}
-                    placeholder="Email"
+                    placeholder={t("checkout.email")}
                     className={`w-full border px-4 py-3 text-sm focus:outline-none ${
                       emailStatus === "exists" ? "border-amber-400 focus:border-amber-500" : "border-neutral-200 focus:border-[#C8A46A]"
                     }`}
@@ -790,7 +777,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
                 {emailStatus === "exists" ? (
                   <div role="status" className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
                     <p className="text-xs leading-relaxed text-amber-800">
-                      Un compte existe déjà avec cette adresse e-mail.
+                      {text("Un compte existe déjà avec cette adresse e-mail.", "An account already exists with this email address.", "Er bestaat al een account met dit e-mailadres.")}
                     </p>
                     <Link
                       href={`/login?${new URLSearchParams({
@@ -799,7 +786,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
                       }).toString()}`}
                       className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-[#2F3A2E] px-4 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#212a20]"
                     >
-                      Se connecter
+                      {text("Se connecter", "Log in", "Inloggen")}
                     </Link>
                   </div>
                 ) : (
@@ -809,7 +796,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
                   name="phone"
                   value={customerInfo.phone}
                   onChange={handleCustomerChange}
-                  placeholder="Téléphone"
+                  placeholder={t("checkout.phone")}
                   className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
                   required
                 />
@@ -818,7 +805,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
                   name="password"
                   value={customerInfo.password ?? ""}
                   onChange={handleCustomerChange}
-                  placeholder="Mot de passe (8 caractères minimum)"
+                  placeholder={text("Mot de passe (8 caractères minimum)", "Password (at least 8 characters)", "Wachtwoord (minimaal 8 tekens)")}
                   autoComplete="new-password"
                   className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
                   required
@@ -839,9 +826,9 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
                     onChange={handleCustomerChange}
                     className="mt-1 h-4 w-4 rounded border-gray-300 text-[#C8A46A] focus:ring-[#C8A46A]"
                   />
-                  <span className="text-sm text-gray-600">Je souhaite recevoir des offres exclusives par email</span>
+                  <span className="text-sm text-gray-600">{t("checkout.newsletterSubscribe")}</span>
                 </label>
-                <p className="text-xs text-gray-400">Votre compte est créé avec le mot de passe choisi ci-dessus.</p>
+                <p className="text-xs text-gray-400">{text("Votre compte est créé avec le mot de passe choisi ci-dessus.", "Your account will be created with the password entered above.", "Uw account wordt aangemaakt met het hierboven gekozen wachtwoord.")}</p>
                   </>
                 )}
               </div>
@@ -850,12 +837,12 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
 
           {/* Notes */}
           <section className="border border-neutral-200 p-6">
-            <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">Notes (optionnel)</h2>
+            <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">{t("checkout.notes")}</h2>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               rows={3}
-              placeholder="Une demande particulière ?"
+              placeholder={t("checkout.notesPlaceholder")}
               className="w-full resize-none border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
             />
           </section>
@@ -863,7 +850,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
 
         {/* Summary */}
         <div className="h-fit border border-neutral-200 p-6">
-          <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">Récapitulatif</h2>
+          <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">{t("checkout.summary")}</h2>
           <ul className="space-y-2 text-sm text-gray-600">
             {cart.items.map((item) => (
               <li key={item.id} className="flex justify-between gap-3">
@@ -886,24 +873,24 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
               order prints the same four figures. */}
           <div className="mt-4 space-y-1.5 border-t border-neutral-100 pt-4 text-sm">
             <div className="flex justify-between text-gray-600">
-              <span>Sous-total HT</span>
+              <span>{text("Sous-total HT", "Subtotal excl. VAT", "Subtotaal excl. btw")}</span>
               <span>€{netTotals.goodsNet.toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-gray-600">
-              <span>Livraison HT</span>
+              <span>{text("Livraison HT", "Shipping excl. VAT", "Verzending excl. btw")}</span>
               <span>
                 {fulfilmentMode !== "SHIPPING_PREPAID"
                   ? "—"
                   : quoteRequired
-                    ? "Devis requis"
+                    ? text("Devis requis", "Quote required", "Offerte vereist")
                     : shippingCost === 0
-                      ? "Offerte"
+                      ? text("Offerte", "Free", "Gratis")
                       : `€${netTotals.shippingNet.toFixed(2)}`}
               </span>
             </div>
             {discountAmount > 0 && (
               <div className="flex justify-between text-emerald-600">
-                <span>Réduction ({appliedPromo.code})</span>
+                <span>{text("Korting", "Discount", "Korting")} ({appliedPromo.code})</span>
                 <span>-€{netTotals.discountNet.toFixed(2)}</span>
               </div>
             )}
@@ -918,11 +905,11 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
               </ul>
             )}
             <div className="flex justify-between text-gray-600">
-              <span>TVA ({vatPreview.vatRate}%)</span>
+              <span>{text("TVA", "VAT", "Btw")} ({vatPreview.vatRate}%)</span>
               <span>{quoteRequired ? "—" : `€${netTotals.vatAmount.toFixed(2)}`}</span>
             </div>
             <div className="flex justify-between border-t border-neutral-100 pt-2 text-base font-semibold text-[#2F3A2E]">
-              <span>Total TTC</span>
+              <span>{text("Total TTC", "Total incl. VAT", "Totaal incl. btw")}</span>
               <span>{quoteRequired ? "—" : `€${total.toFixed(2)}`}</span>
             </div>
           </div>
@@ -946,15 +933,14 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
             quoteRequest.sent ? (
               <div className="mt-4 flex items-start gap-3 border border-green-200 bg-green-50 p-4 text-sm text-green-800">
                 <CheckCircle2 size={18} className="mt-0.5 shrink-0 text-green-600" />
-                <p>Votre demande de devis a été envoyée. Nous vous recontacterons sous peu par email ou téléphone.</p>
+                <p>{t("checkout.quoteSent")}</p>
               </div>
             ) : (
               <div className="mt-4 space-y-3 border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
                 <div className="flex items-start gap-3">
                   <AlertTriangle size={18} className="mt-0.5 shrink-0 text-amber-600" />
                   <p>
-                    Votre commande dépasse 30&nbsp;kg ({shippingDetails.totalWeightKg?.toFixed(1)}&nbsp;kg) : aucun tarif de
-                    livraison automatique ne s&apos;applique. Demandez un devis personnalisé, ou choisissez le retrait en boutique.
+                    {text(`Votre commande dépasse 30 kg (${shippingDetails.totalWeightKg?.toFixed(1)} kg) : aucun tarif de livraison automatique ne s'applique. Demandez un devis personnalisé, ou choisissez le retrait en boutique.`, `Your order exceeds 30 kg (${shippingDetails.totalWeightKg?.toFixed(1)} kg): no automatic delivery rate applies. Request a custom quote or choose in-store pickup.`, `Uw bestelling overschrijdt 30 kg (${shippingDetails.totalWeightKg?.toFixed(1)} kg): er geldt geen automatisch bezorgtarief. Vraag een offerte aan of kies voor afhalen in de winkel.`)}
                   </p>
                 </div>
                 <button
@@ -964,7 +950,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
                   className="inline-flex items-center gap-2 rounded-full bg-amber-600 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-amber-700 disabled:opacity-60"
                 >
                   {quoteRequest.submitting && <Loader2 size={14} className="animate-spin" />}
-                  Demander un devis
+                  {t("checkout.requestQuote")}
                 </button>
               </div>
             )
@@ -978,13 +964,13 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
               className="mt-0.5"
             />
             <span>
-              J&apos;ai lu et j&apos;accepte les{" "}
+              {text("J'ai lu et j'accepte les", "I have read and accept the", "Ik heb de volgende documenten gelezen en aanvaard:")}{" "}
               <a href="/cgv" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#C8A46A]">
-                Conditions générales de vente
+                {t("checkout.cgvLink")}
               </a>{" "}
-              et la{" "}
+              {text("et la", "and the", "en het")}{" "}
               <a href="/politique-de-confidentialite" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#C8A46A]">
-                Politique de confidentialité
+                {t("checkout.privacyLink")}
               </a>
               .
             </span>
@@ -998,10 +984,10 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
             {submitting ? (
               <>
                 <Loader2 size={16} className="animate-spin" />
-                Traitement…
+                {t("checkout.processing")}
               </>
             ) : (
-              "Confirmer la commande"
+              t("checkout.confirmOrder")
             )}
           </button>
         </div>

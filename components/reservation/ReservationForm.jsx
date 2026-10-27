@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ChevronLeft, ChevronRight, Clock, Euro, Calendar, User, Sparkles, X } from "lucide-react";
 import { toast } from "sonner";
 import { toIntlLocale } from "@/lib/intl-locale";
+import { translateCategoryName } from "@/lib/category-label";
 import CategoryStep from "./steps/CategoryStep";
 import ServiceStep from "./steps/ServiceStep";
 import StaffStep from "./steps/StaffStep";
@@ -62,6 +63,9 @@ const ALL_STEPS = [
 
 // ─── Persistent Summary ───────────────────────────────────────────────
 function SummarySidebar({ data, onEdit, readOnly = false }) {
+  const t = useTranslations("bookingUi");
+  const tCat = useTranslations("categories.names");
+  const locale = useLocale();
   const drafts = data.appointmentDrafts ?? [];
   const hasDrafts = drafts.length > 0;
   const hasCategory = Boolean(data.category);
@@ -80,7 +84,7 @@ function SummarySidebar({ data, onEdit, readOnly = false }) {
         <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#2F3A2E] text-white">
           <Sparkles size={14} />
         </div>
-        <h3 className="text-sm font-semibold tracking-wide text-[#2F3A2E]">Votre sélection</h3>
+        <h3 className="text-sm font-semibold tracking-wide text-[#2F3A2E]">{t("yourSelection")}</h3>
       </div>
 
       <div className="space-y-4">
@@ -88,9 +92,9 @@ function SummarySidebar({ data, onEdit, readOnly = false }) {
         {hasDrafts ? (
           drafts.map((d, i) => (
             <div key={i} className="rounded-xl border border-[#f0e8d8] bg-[#fdf8f0]/60 p-3">
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-[#b89664]">Rendez-vous {i + 1}</p>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-[#b89664]">{t("appointmentN", { index: i + 1 })}</p>
               <p className="mt-1 text-sm font-semibold text-[#2F3A2E] leading-tight">{d.service?.name ?? "—"}</p>
-              <p className="text-xs text-[#6f6a64]">{d.category?.name ?? ""}</p>
+              <p className="text-xs text-[#6f6a64]">{translateCategoryName(tCat, d.category?.name, locale) ?? ""}</p>
               <div className="mt-2 flex items-center gap-2 text-xs text-[#6f6a64]">
                 <span className="inline-flex items-center gap-1"><User size={11} className="text-[#b89664]" />{d.staff?.user?.fullName ?? "—"}</span>
               </div>
@@ -105,28 +109,28 @@ function SummarySidebar({ data, onEdit, readOnly = false }) {
             {hasCategory && (
               <div className="flex items-center justify-between rounded-xl bg-[#fdf8f0] px-3 py-2.5">
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-widest text-[#9a9590]">Catégorie</p>
-                  <p className="text-sm font-medium text-[#2F3A2E]">{data.category.name}</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-[#9a9590]">{t("category")}</p>
+                  <p className="text-sm font-medium text-[#2F3A2E]">{translateCategoryName(tCat, data.category.name, locale)}</p>
                 </div>
-                {!readOnly && <button onClick={() => onEdit(1)} className="text-[11px] font-medium text-[#b89664] hover:text-[#2F3A2E]">Modifier</button>}
+                {!readOnly && <button onClick={() => onEdit(1)} className="text-[11px] font-medium text-[#b89664] hover:text-[#2F3A2E]">{t("edit")}</button>}
               </div>
             )}
             {hasService && (
               <div className="flex items-center justify-between rounded-xl bg-[#fdf8f0] px-3 py-2.5">
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-widest text-[#9a9590]">Prestation</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-[#9a9590]">{t("service")}</p>
                   <p className="text-sm font-medium text-[#2F3A2E] leading-tight">{data.service.name}</p>
                 </div>
-                {!readOnly && <button onClick={() => onEdit(2)} className="text-[11px] font-medium text-[#b89664] hover:text-[#2F3A2E]">Modifier</button>}
+                {!readOnly && <button onClick={() => onEdit(2)} className="text-[11px] font-medium text-[#b89664] hover:text-[#2F3A2E]">{t("edit")}</button>}
               </div>
             )}
             {hasStaff && (
               <div className="flex items-center justify-between rounded-xl bg-[#fdf8f0] px-3 py-2.5">
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-widest text-[#9a9590]">Experte</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-[#9a9590]">{t("expert")}</p>
                   <p className="text-sm font-medium text-[#2F3A2E]">{data.staff?.user?.fullName ?? "—"}</p>
                 </div>
-                {!readOnly && <button onClick={() => onEdit(3)} className="text-[11px] font-medium text-[#b89664] hover:text-[#2F3A2E]">Modifier</button>}
+                {!readOnly && <button onClick={() => onEdit(3)} className="text-[11px] font-medium text-[#b89664] hover:text-[#2F3A2E]">{t("edit")}</button>}
               </div>
             )}
           </>
@@ -134,19 +138,19 @@ function SummarySidebar({ data, onEdit, readOnly = false }) {
 
         {hasDateTime && (
           <div className="rounded-xl border border-[#ede5d8] bg-white px-3 py-2.5">
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-[#9a9590]">Date & Heure</p>
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-[#9a9590]">{t("dateTime")}</p>
             {data.selectedScheduleProposal ? (
-              <p className="mt-1 text-sm font-medium text-[#2F3A2E]">Créneau confirmé</p>
+              <p className="mt-1 text-sm font-medium text-[#2F3A2E]">{t("slotConfirmed")}</p>
             ) : (
-              <p className="mt-1 text-sm font-medium text-[#2F3A2E]">{data.date ? new Date(data.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric", timeZone: "Europe/Brussels" }) : "—"} • {data.time ?? "—"}</p>
+              <p className="mt-1 text-sm font-medium text-[#2F3A2E]">{data.date ? new Date(data.date).toLocaleDateString(toIntlLocale(locale), { day: "2-digit", month: "short", year: "numeric", timeZone: "Europe/Brussels" }) : "—"} • {data.time ?? "—"}</p>
             )}
-            <button onClick={() => onEdit(5)} className="mt-1 text-[11px] font-medium text-[#b89664] hover:text-[#2F3A2E]">Modifier</button>
+            <button onClick={() => onEdit(5)} className="mt-1 text-[11px] font-medium text-[#b89664] hover:text-[#2F3A2E]">{t("edit")}</button>
           </div>
         )}
 
         {(totalPrice > 0 || totalDuration > 0) && (
           <div className="flex items-center justify-between border-t border-[#ede5d8] pt-4">
-            <span className="text-xs font-medium text-[#6f6a64]">Total estimé</span>
+            <span className="text-xs font-medium text-[#6f6a64]">{t("totalEstimated")}</span>
             <span className="text-sm font-bold tracking-tight text-[#2F3A2E]">{totalDuration ? `${totalDuration} min • ` : ""}€{Number(totalPrice).toFixed(2)}</span>
           </div>
         )}
@@ -156,13 +160,16 @@ function SummarySidebar({ data, onEdit, readOnly = false }) {
 }
 
 function MobileSummary({ data, onEdit, readOnly = false }) {
+  const t = useTranslations("bookingUi");
+  const tCat = useTranslations("categories.names");
+  const locale = useLocale();
   const [open, setOpen] = useState(false);
   const drafts = data.appointmentDrafts ?? [];
   const count = drafts.length || (data.category ? 1 : 0);
   if (count === 0) return null;
   const totalPrice = drafts.length ? drafts.reduce((s, d) => s + Number(d.price ?? 0), 0) : data.staffService ? Number(data.staffService.price ?? 0) : 0;
   const totalDuration = drafts.length ? drafts.reduce((s, d) => s + (d.duration ?? 0), 0) : data.staffService?.duration ?? 0;
-  const label = drafts.length ? `${drafts.length} rendez-vous • €${totalPrice.toFixed(2)}` : data.service ? `${data.service.name} • €${totalPrice.toFixed(2)}` : data.category ? data.category.name : "Votre sélection";
+  const label = drafts.length ? `${t("appointmentsCount", { count: drafts.length })} • €${totalPrice.toFixed(2)}` : data.service ? `${data.service.name} • €${totalPrice.toFixed(2)}` : data.category ? translateCategoryName(tCat, data.category.name, locale) : t("yourSelection");
   return (
     <div className="lg:hidden">
       <button
@@ -173,7 +180,7 @@ function MobileSummary({ data, onEdit, readOnly = false }) {
           <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#2F3A2E] text-white"><Sparkles size={13} /></div>
           <div>
             <p className="text-xs font-semibold text-[#2F3A2E] leading-tight line-clamp-1">{label}</p>
-            <p className="text-[11px] text-[#6f6a64]">{totalDuration ? `${totalDuration} min` : "Détails"}</p>
+            <p className="text-[11px] text-[#6f6a64]">{totalDuration ? `${totalDuration} min` : t("details")}</p>
           </div>
         </div>
         <span className={`flex h-7 w-7 items-center justify-center rounded-full border border-[#ede5d8] bg-[#fdf8f0] text-[#2F3A2E] transition-transform ${open ? "rotate-180" : ""}`}><ChevronRight size={14} className="rotate-90" /></span>

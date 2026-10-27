@@ -1,10 +1,15 @@
 import { NouvelAvisPageClient } from "./NouvelAvisPageClient";
+import { getTranslations } from "next-intl/server";
 
-export const metadata = {
-  title: "Laisser un avis – Meri Beauty",
-  description: "Partagez votre expérience chez Meri Beauty et aidez-nous à nous améliorer.",
-  robots: { index: false, follow: false },
-};
+// Titre traduit selon la langue choisie (cookie NEXT_LOCALE) — MB-008.
+export async function generateMetadata() {
+  const t = await getTranslations("pageMeta");
+  return {
+    title: t("newReviewTitle"),
+    description: t("newReviewDescription"),
+    robots: { index: false, follow: false },
+  };
+}
 
 export default function NouvelAvisPage({ searchParams }) {
   const token = searchParams?.token ?? null;

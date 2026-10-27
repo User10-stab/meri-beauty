@@ -911,10 +911,10 @@ function AtmosphereSection() {
 // ─────────────────────────────────────────────────────────────
 
 const UNIVERSE_IMAGES = {
-  studio: { image: "/Images/LE STUDIO.webp", imageAltKey: "studio", href: "/reservation#booking"},
-  boutique: { image: "/Images/LA BOUTIQUE.webp", imageAltKey: "boutique", href: "/boutique" },
-  formations: { image: "/Images/LES FORMATIONS.webp", imageAltKey: "formations", href: "/formations" },
-  ateliers: { image: "/Images/LES ATELIERS ET EVENEMENTS.webp", imageAltKey: "ateliers", href: "/evenements" },
+  studio: { image: "/Images/le-studio.webp", imageAltKey: "studio", href: "/reservation#booking"},
+  boutique: { image: "/Images/la-boutique.webp", imageAltKey: "boutique", href: "/boutique" },
+  formations: { image: "/Images/les-formations.webp", imageAltKey: "formations", href: "/formations" },
+  ateliers: { image: "/Images/les-ateliers-et-evenements.webp", imageAltKey: "ateliers", href: "/evenements" },
 };
 const UNIVERSE_KEYS = ["studio", "boutique", "formations", "ateliers"];
 
@@ -1154,13 +1154,13 @@ function FinalCtaSection() {
 
   return (
     <section
-      className="relative overflow-hidden bg-cover bg-center bg-no-repeat sm:min-h-[50vh] lg:h-[75vh] z-0" style={{ backgroundImage: `url('/Images/FINAL CTA.webp')` }}
+      className="relative overflow-hidden bg-cover bg-center bg-no-repeat sm:min-h-[50vh] lg:h-[75vh] z-0" style={{ backgroundImage: `url('/Images/final-cta.webp')` }}
       aria-label="Prêt à pousser la porte"
     >
       {/* Parallax background */}
       <div className="absolute inset-0 will-change-transform bg-black/60 z-1" >
         {/* <Image
-          src="/Images/FINAL CTA.webp"
+          src="/Images/final-cta.webp"
           alt="Invitation à entrer chez MeriBeauty"
           fill
           className="object-cover object-center"

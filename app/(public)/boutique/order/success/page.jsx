@@ -4,12 +4,16 @@ import { prisma } from "@/lib/prisma";
 import { pickupQrDataUrl } from "@/lib/qrcode";
 import { CartClearedNotifier } from "@/components/boutique/CartClearedNotifier";
 import { PurchaseTracker } from "@/components/boutique/PurchaseTracker";
+import { getTranslations } from "next-intl/server";
 
-export const metadata = {
-  // Deliberately neutral — this page also renders the "payment pending" and
-  // "session not found" states, where "confirmée" would be misleading.
-  title: "Votre commande – Meri Beauty",
-};
+export async function generateMetadata() {
+  const t = await getTranslations("boutique.metadata");
+  return {
+    // Deliberately neutral — this page also renders the "payment pending" and
+    // "session not found" states, where "confirmée" would be misleading.
+    title: t("orderSuccessPage"),
+  };
+}
 
 /**
  * Landing page after checkout. The Stripe webhook (or, for pay-on-site

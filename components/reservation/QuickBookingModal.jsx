@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { X, CalendarCheck } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { getQuickBookingPrefill } from "@/actions/reservation/get-quick-booking-prefill";
 import ReservationForm from "@/components/reservation/ReservationForm";
 
@@ -26,7 +27,8 @@ export default function QuickBookingModal({
   customerSession = null,
 }) {
   const router = useRouter();
-  const origin = staffId ? `/staff/${staffId}` : "/reservation";
+  const t = useTranslations("reservationSteps");
+  const origin =staffId ? `/staff/${staffId}` : "/reservation";
   const [preset, setPreset] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -161,6 +163,23 @@ export default function QuickBookingModal({
                 />
               )}
             </div>
+
+            {/* Pied légal (audit MB-005) : la popup masque le footer du site,
+                les CGV et la politique de confidentialité doivent rester
+                consultables pendant toute la réservation. Nouvel onglet pour
+                ne pas perdre la réservation en cours. */}
+            <nav
+              aria-label={t("legalFooterAria")}
+              className="shrink-0 border-t border-[#ede5d8]/70 bg-white px-5 py-2.5 text-center text-[11px] text-[#9a9590] sm:px-7"
+            >
+              <a href="/cgv" target="_blank" rel="noopener noreferrer" className="underline-offset-2 hover:text-[#2F3A2E] hover:underline">
+                {t("legalFooterCgv")}
+              </a>
+              <span aria-hidden="true" className="mx-2">·</span>
+              <a href="/politique-de-confidentialite" target="_blank" rel="noopener noreferrer" className="underline-offset-2 hover:text-[#2F3A2E] hover:underline">
+                {t("legalFooterPrivacy")}
+              </a>
+            </nav>
           </motion.div>
         </motion.div>
       )}

@@ -8,6 +8,7 @@ import { useSession, signIn } from "next-auth/react";
 import { toggleNewsletterSubscription } from "@/actions/newsletter/toggle-subscription";
 import { Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
+import CookieSettingsButton from "@/components/analytics/CookieSettingsButton";
 
 function InstagramIcon({ className = "w-5 h-5" }) {
   return (
@@ -320,6 +321,7 @@ export default function Footer({ salon }) {
                   <LeafBulletIcon className="h-3.5 w-2.5 shrink-0 text-gold/70" />
                   <Link
                     href={link.href}
+                    prefetch={false}
                     className="text-[13px] leading-none text-white/60 transition-colors duration-200 hover:text-white"
                   >
                     {link.label}
@@ -454,6 +456,8 @@ export default function Footer({ salon }) {
             <Link href="/mentions-legales" className="px-2.5 py-1 transition-colors hover:text-white/70">{t("legalNotice")}</Link>
             <span aria-hidden="true" className="text-gold/30">|</span>
             <Link href="/politique-de-confidentialite" className="px-2.5 py-1 transition-colors hover:text-white/70">{t("privacyPolicy")}</Link>
+            <span aria-hidden="true" className="text-gold/30">|</span>
+            <CookieSettingsButton className="px-2.5 py-1 transition-colors hover:text-white/70" />
           </div>
         </div>
       </div>

@@ -137,8 +137,19 @@ export async function POST(request) {
     return badRequest("Validation échouée.", errors);
   }
 
-  const { rentalType, startDate, desiredPace, commissionType, specialty, vatNumber, message } =
-    validationResult.data;
+  const {
+    rentalType,
+    startDate,
+    desiredPace,
+    commissionType,
+    specialty,
+    vatNumber,
+    message,
+    firstName,
+    lastName,
+    email,
+    phone,
+  } = validationResult.data;
 
   let vatValidation = null;
   if (vatNumber) {
@@ -193,6 +204,13 @@ export async function POST(request) {
           // User and is already persisted in the tx.user.update() call above.
           status: "PENDING",
           message,
+          // Coordonnées saisies dans le formulaire (MB-004). Stockées sur la
+          // demande, pas recopiées sur le compte : User.phone est unique et un
+          // conflit ferait échouer la candidature.
+          firstName,
+          lastName,
+          email,
+          phone,
         },
         include: {
           user: {
@@ -218,7 +236,10 @@ export async function POST(request) {
               userId: uid,
               rentalRequestId: result.rentalRequest.id,
               rentalType: result.rentalRequest.rentalType,
-              applicantName: result.rentalRequest.user?.fullName,
+              applicantName:
+                [result.rentalRequest.firstName, result.rentalRequest.lastName]
+                  .filter(Boolean)
+                  .join(" ") || result.rentalRequest.user?.fullName,
             })
           )
         );
@@ -237,6 +258,24 @@ export async function POST(request) {
       select: { email: true },
     });
 
+    // Coordonnées de la candidate en tête du mail : c'est ce dont Marie a
+    // besoin pour « revenir vers elle rapidement » (MB-004). Le mail n'en
+    // contenait aucune jusqu'ici.
+    const rr = result.rentalRequest;
+    const applicantName =
+      [rr.firstName, rr.lastName].filter(Boolean).join(" ") || rr.user?.fullName || "—";
+    const contactRows = [
+      ["Candidate", applicantName],
+      ["E-mail", rr.email || rr.user?.email || "—"],
+      ["Téléphone", rr.phone || "—"],
+      ["Spécialité", rr.specialty || "—"],
+      ["Numéro de TVA", vatNumber || "Non communiqué"],
+    ];
+    const contactText = contactRows.map(([k, v]) => `${k}: ${v}\n`).join("");
+    const contactHtml = `<p>${contactRows
+      .map(([k, v]) => `<strong>${escapeHtml(k)}:</strong> ${escapeHtml(v)}`)
+      .join("<br>")}</p>`;
+
     for (const admin of admins) {
       if (admin.email) {
         const paceLabels = {
@@ -251,8 +290,8 @@ export async function POST(request) {
         await sendEmail({
           to: admin.email,
           subject: "Nouvelle demande de location – Meri Beauty",
-          text: `Bonjour,\n\nUne nouvelle demande de location a été soumise.\n\nType: ${result.rentalRequest.rentalType}\nDate de début: ${new Date(result.rentalRequest.startDate).toLocaleDateString("fr-FR")}\n${paceLabel ? `Rythme souhaité: ${paceLabel}\n` : ""}Type de commission: ${result.rentalRequest.commissionType}\n\nMessage: ${result.rentalRequest.message || "Aucun message"}\n\nVeuillez consulter le tableau de bord pour traiter cette demande.\n\nL'équipe Meri Beauty`,
-          html: `<p>Bonjour,</p><p>Une nouvelle demande de location a été soumise.</p><p><strong>Type:</strong> ${escapeHtml(result.rentalRequest.rentalType)}<br><strong>Date de début:</strong> ${new Date(result.rentalRequest.startDate).toLocaleDateString("fr-FR")}${paceLabel ? `<br><strong>Rythme souhaité:</strong> ${escapeHtml(paceLabel)}` : ""}<br><strong>Type de commission:</strong> ${escapeHtml(result.rentalRequest.commissionType)}</p><p><strong>Message:</strong> ${escapeHtml(result.rentalRequest.message || "Aucun message")}</p><p>Veuillez consulter le tableau de bord pour traiter cette demande.</p><p>L'équipe Meri Beauty</p>`,
+          text: `Bonjour,\n\nUne nouvelle demande de location a été soumise.\n\n${contactText}\nType: ${result.rentalRequest.rentalType}\nDate de début: ${new Date(result.rentalRequest.startDate).toLocaleDateString("fr-FR")}\n${paceLabel ? `Rythme souhaité: ${paceLabel}\n` : ""}Type de commission: ${result.rentalRequest.commissionType}\n\nMessage: ${result.rentalRequest.message || "Aucun message"}\n\nVeuillez consulter le tableau de bord pour traiter cette demande.\n\nL'équipe Meri Beauty`,
+          html: `<p>Bonjour,</p><p>Une nouvelle demande de location a été soumise.</p>${contactHtml}<p><strong>Type:</strong> ${escapeHtml(result.rentalRequest.rentalType)}<br><strong>Date de début:</strong> ${new Date(result.rentalRequest.startDate).toLocaleDateString("fr-FR")}${paceLabel ? `<br><strong>Rythme souhaité:</strong> ${escapeHtml(paceLabel)}` : ""}<br><strong>Type de commission:</strong> ${escapeHtml(result.rentalRequest.commissionType)}</p><p><strong>Message:</strong> ${escapeHtml(result.rentalRequest.message || "Aucun message")}</p><p>Veuillez consulter le tableau de bord pour traiter cette demande.</p><p>L'équipe Meri Beauty</p>`,
         }).catch((err) => console.error("[POST /api/rental-requests] admin email failed:", err));
       }
     }

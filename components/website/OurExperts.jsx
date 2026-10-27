@@ -3,57 +3,10 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
+import { translateCategoryName } from "@/lib/category-label";
 import { ArrowRight } from "lucide-react";
 import { ArrowIcon } from "./icons";
-
-
-const FALLBACK_STYLISTS = [
-  {
-    id: 1,
-    name: "Lyly",
-    speciality: "Prothésiste ongulaire",
-    specialityKey: null,
-    experience: 5,
-    image: "/Images/expert.webp",
-    categories: [],
-  },
-  {
-    id: 2,
-    name: "Aurélie",
-    speciality: "Experte en soins naturels",
-    specialityKey: null,
-    experience: 6,
-    image: "/Images/expert.webp",
-    categories: [],
-  },
-  {
-    id: 3,
-    name: "Marie",
-    speciality: "Fondatrice & coordination",
-    specialityKey: null,
-    experience: 8,
-    image: "/Images/expert.webp",
-    categories: [],
-  },
-  {
-    id: 4,
-    name: "Sofia Bellamy",
-    specialityKey: "expertSpecialtyHair",
-    experience: 8,
-    image: "/Images/expert.webp",
-    categories: [],
-  },
-  {
-    id: 5,
-    name: "Camille",
-    speciality: "Maquilleuse professionnelle",
-    specialityKey: null,
-    experience: 4,
-    image: "/Images/expert.webp",
-    categories: [],
-  },
-];
 
 function useInView(threshold = 0.15) {
   const ref = useRef(null);
@@ -137,10 +90,16 @@ function SprigThree({ className = "w-14 h-20" }) {
 }
 const SPRIGS = [SprigOne, SprigTwo, SprigThree];
 
-export default function OurExperts() {
+/*
+ * `experts` vient du serveur (lib/website/get-public-experts.js, lu par
+ * app/(public)/page.js) : le HTML rendu côté serveur — celui que Google
+ * indexe — contient la vraie équipe. Il n’y a plus d’équipe de démonstration
+ * ni de chargement côté navigateur (audit MB-009). Aucune experte publiée →
+ * la section ne s’affiche pas.
+ */
+export default function OurExperts({ experts = [] }) {
   const t = useTranslations("home");
-  const [stylists, setStylists] = useState(FALLBACK_STYLISTS);
-  const [isLoading, setIsLoading] = useState(true);
+  const list = Array.isArray(experts) ? experts : [];
   const [headerRef, headerInView] = useInView();
   const [cardsRef, cardsInView] = useInView();
   const trackRef = useRef(null);
@@ -158,7 +117,7 @@ export default function OurExperts() {
     updateArrows();
     window.addEventListener("resize", updateArrows);
     return () => window.removeEventListener("resize", updateArrows);
-  }, [stylists.length, isLoading]);
+  }, [list.length]);
 
   const scrollTrack = (dir) => {
     const el = trackRef.current;
@@ -166,25 +125,8 @@ export default function OurExperts() {
     el.scrollBy({ left: dir * el.clientWidth * 0.8, behavior: "smooth" });
   };
 
-  useEffect(() => {
-    async function loadExperts() {
-      try {
-        const response = await fetch("/api/staff");
-        if (!response.ok) return;
-        const data = await response.json();
-        if (Array.isArray(data) && data.length > 0) {
-          setStylists(data);
-        }
-      } catch {
-        // Keep fallback
-      } finally {
-        setIsLoading(false);
-      }
-    }
-    loadExperts();
-  }, []);
-
-  const list = isLoading ? FALLBACK_STYLISTS : stylists;
+  // Hooks au-dessus, sans condition ; la garde vient après eux.
+  if (list.length === 0) return null;
 
   return (
     <section id="equipe" className="relative w-full overflow-hidden bg-[#fdf8f0]">
@@ -261,6 +203,8 @@ function ExpertCard({ stylist, index, t }) {
   const Sprig = SPRIGS[index % SPRIGS.length];
   const imageSrc = stylist.image || "/Images/expert.webp";
   const categories = Array.isArray(stylist.categories) ? stylist.categories : [];
+  const tCat = useTranslations("categories.names");
+  const locale = useLocale();
 
   return (
     <article className="group relative flex w-[80%] shrink-0 snap-start flex-col overflow-hidden rounded-2xl border border-[#ede5d8] bg-white shadow-[0_2px_18px_rgba(47,58,46,0.07)] transition-all duration-300 hover:shadow-[0_8px_28px_rgba(47,58,46,0.12)] sm:w-[calc(50%-12px)] lg:w-[calc(20%-16px)]">
@@ -292,7 +236,7 @@ function ExpertCard({ stylist, index, t }) {
                 href={`/staff/${stylist.id}?category=${encodeURIComponent(category)}`}
                 className="group/pill flex items-center gap-1.5 rounded-full border border-gold/30 px-2 py-1.5 text-[11px] font-medium leading-none text-gold transition-all duration-200 hover:border-gold hover:bg-gold hover:text-white"
               >
-                <span className="lowercase">{category}</span>
+                <span className="lowercase">{translateCategoryName(tCat, category, locale)}</span>
                 <ArrowRight size={12} className="text-gold transition-colors group-hover/pill:text-white" />
               </Link>
             ))}

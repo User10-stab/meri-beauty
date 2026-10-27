@@ -1,10 +1,15 @@
 import LegalPageLayout, { H2, P, Ul } from "@/components/website/LegalPageLayout";
+import { getTranslations } from "next-intl/server";
 
-export const metadata = {
-  title: "Mentions légales | Meri Beauty",
-  description: "Identité de l'exploitante, coordonnées, hébergement et informations légales du site Meri Beauty.",
-  alternates: { canonical: "/mentions-legales" },
-};
+// Titre traduit selon la langue choisie (cookie NEXT_LOCALE) — MB-008.
+export async function generateMetadata() {
+  const t = await getTranslations("pageMeta");
+  return {
+    title: t("mentionsTitle"),
+    description: t("mentionsDescription"),
+    alternates: { canonical: "/mentions-legales" },
+  };
+}
 
 export default function MentionsLegalesPage() {
   return (

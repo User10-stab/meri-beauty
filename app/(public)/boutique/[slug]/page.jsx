@@ -2,13 +2,17 @@ import { notFound } from "next/navigation";
 import { getStorefrontProductBySlug } from "@/actions/boutique/storefront";
 import { ProductDetailClient } from "@/components/boutique/ProductDetailClient";
 import { getAppBaseUrl } from "@/lib/site-url";
+import { getTranslations } from "next-intl/server";
 
 const SITE_URL = getAppBaseUrl();
 
 export async function generateMetadata({ params }) {
   const { slug } = await params;
   const result = await getStorefrontProductBySlug(slug);
-  if (!result.success) return { title: "Produit introuvable – Meri Beauty" };
+  if (!result.success) {
+    const t = await getTranslations("pageMeta");
+    return { title: t("productNotFound") };
+  }
   return {
     title: `${result.data.name} – Meri Beauty`,
     description: result.data.description ?? undefined,

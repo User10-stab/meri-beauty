@@ -35,10 +35,18 @@ export async function getRentalRequests() {
       },
     });
 
+    // Les coordonnées saisies dans le formulaire (audit MB-004) priment sur
+    // celles du compte : liste, détail, recherche et création du staff les
+    // reprennent ainsi sans changement. Anciennes demandes : compte seul.
     const serialised = rentalRequests.map((r) => ({
       id: r.id,
       userId: r.userId,
-      user: r.user,
+      user: r.user && {
+        ...r.user,
+        fullName: [r.firstName, r.lastName].filter(Boolean).join(" ") || r.user.fullName,
+        email: r.email || r.user.email,
+        phone: r.phone || r.user.phone,
+      },
       rentalType: r.rentalType,
       startDate: r.startDate.toISOString(),
       endDate: r.endDate ? r.endDate.toISOString() : null,

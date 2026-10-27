@@ -23,24 +23,47 @@ const baseRequest = {
   rentalType: "Cabine privative",
   startDate: formatDateInputValue(addDays(new Date(), 30)),
   commissionType: "FIXED",
-  specialty: "Coiffure",
+  specialty: "Onglerie",
+  // Coordonnées obligatoires depuis l'audit MB-004.
+  lastName: "Dupont",
+  firstName: "Sarah",
+  email: "sarah@example.test",
+  phone: "0470 12 34 56",
 };
 
-// The rental form marks the VAT field with a red asterisk and sets `required`,
-// but that is browser-only: the schema behind the POST route accepted the
-// field missing, and accepted any string up to 50 characters when present.
-// A rental request opens a B2B relationship that Marie invoices monthly.
+// Le numéro de TVA est FACULTATIF depuis 2026-10 (décision de la cliente,
+// audit MB-004) — mais, dès qu'il est saisi, son format est vraiment vérifié :
+// le schéma acceptait jusqu'ici n'importe quelle chaîne de 50 caractères.
 describe("the rental request VAT number is really validated", () => {
-  test("a request without a VAT number is rejected, in French", () => {
-    const result = createRentalRequestSchema.safeParse(baseRequest);
-    expect(result.success).toBe(false);
-    // Guards the Zod 4 trap: `required_error` compiles but is ignored at
-    // runtime, so the customer would get Zod's English default instead.
-    expect(JSON.stringify(result.error.issues)).toContain("obligatoire");
-    expect(JSON.stringify(result.error.issues)).not.toContain("Invalid input");
+  test("a request without a VAT number is accepted", () => {
+    expect(createRentalRequestSchema.safeParse(baseRequest).success).toBe(true);
+    // Champ vide du formulaire = pas de numéro, pas une erreur de format.
+    const empty = createRentalRequestSchema.safeParse({ ...baseRequest, vatNumber: "  " });
+    expect(empty.success).toBe(true);
+    expect(empty.data.vatNumber).toBeUndefined();
   });
 
-  test.each([["abc"], ["123"], ["bonjour"], ["BE1234567890"], [""]])(
+  test.each([["lastName"], ["firstName"], ["email"], ["phone"]])(
+    "a request without %s is rejected, in French",
+    (field) => {
+      const { [field]: _omitted, ...rest } = baseRequest;
+      const result = createRentalRequestSchema.safeParse(rest);
+      expect(result.success).toBe(false);
+      // Guards the Zod 4 trap: `required_error` compiles but is ignored at
+      // runtime, so the customer would get Zod's English default instead.
+      expect(JSON.stringify(result.error.issues)).toContain("obligatoire");
+      expect(JSON.stringify(result.error.issues)).not.toContain("Invalid input");
+    }
+  );
+
+  test.each([["email", "pas-un-email"], ["phone", "12"], ["phone", "abcdefghij"]])(
+    "a malformed %s (%s) is rejected",
+    (field, value) => {
+      expect(createRentalRequestSchema.safeParse({ ...baseRequest, [field]: value }).success).toBe(false);
+    }
+  );
+
+  test.each([["abc"], ["123"], ["bonjour"], ["BE1234567890"]])(
     "%s is rejected as a VAT number",
     (vatNumber) => {
       const result = createRentalRequestSchema.safeParse({ ...baseRequest, vatNumber });

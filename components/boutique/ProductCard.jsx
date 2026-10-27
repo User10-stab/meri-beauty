@@ -1,4 +1,7 @@
-import Link from "next/link";
+// Préchargement au survol/toucher seulement : une grille de cartes visibles
+// déclencherait sinon deux rendus serveur par fiche produit (voir
+// components/website/IntentPrefetchLink.jsx).
+import Link from "@/components/website/IntentPrefetchLink";
 import Image from "next/image";
 import { useTranslations } from "next-intl";
 import { ProductPrice } from "@/components/boutique/ProductPrice";

@@ -8,12 +8,14 @@ import { computePaymentDecision } from "@/lib/reservation-payment";
 import { signIn } from "next-auth/react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
+import { toIntlLocale } from "@/lib/intl-locale";
 import { PromoCodeField } from "@/components/shared/PromoCodeField";
 import CardBotanicalSprigs from "@/components/reservation/CardBotanicalSprigs";
 import StepBackArrow from "@/components/reservation/StepBackArrow";
 
 function PaymentOption({ title, description, badge, selected, disabled, index, onSelect }) {
+  const tUi = useTranslations("bookingUi");
   return (
     <button
       type="button"
@@ -29,13 +31,15 @@ function PaymentOption({ title, description, badge, selected, disabled, index, o
       <p className="mb-2 text-[15px] font-bold uppercase text-[#b89664]">{title}</p>
       <div className="mt-4 h-px w-10 bg-[#b89664]/20" />
       <p className="mt-2 text-[14px] leading-relaxed text-[#232a21]">{description}</p>
-      <span className="mt-6 inline-flex rounded-full border border-[#b89664] bg-[#b89664] px-4 py-2 text-[12px] font-medium text-white transition-all hover:shadow-md">Choisir ce mode</span>
+      <span className="mt-6 inline-flex rounded-full border border-[#b89664] bg-[#b89664] px-4 py-2 text-[12px] font-medium text-white transition-all hover:shadow-md">{tUi("chooseThisMode")}</span>
     </button>
   );
 }
 
 export default function PaymentStep({ data, customerSession, origin = "/reservation", showStatus, prevStep, lockPreset = false }) {
   const t = useTranslations("reservationSteps");
+  const tUi = useTranslations("bookingUi");
+  const locale = useLocale();
   const [paymentMethod, setPaymentMethod] = useState(null);
   const [processing, setProcessing] = useState(false);
   const [appliedPromo, setAppliedPromo] = useState(null);
@@ -43,7 +47,7 @@ export default function PaymentStep({ data, customerSession, origin = "/reservat
   const router = useRouter();
   const fallbackServiceName = data.appointmentDrafts?.[0]?.service?.name ?? data.service?.name ?? null;
   const fallbackStaffName = data.appointmentDrafts?.[0]?.staff?.user?.fullName ?? data.staff?.user?.fullName ?? null;
-  const fallbackDateLabel = data.date ? `${new Date(data.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric", timeZone: "Europe/Brussels" })} • ${data.time ?? ""}` : null;
+  const fallbackDateLabel = data.date ? `${new Date(data.date).toLocaleDateString(toIntlLocale(locale), { day: "2-digit", month: "short", year: "numeric", timeZone: "Europe/Brussels" })} • ${data.time ?? ""}` : null;
 
   const drafts = data.appointmentDrafts ?? [];
   const draft = drafts[0];
@@ -189,7 +193,7 @@ export default function PaymentStep({ data, customerSession, origin = "/reservat
           {paymentMethod === "online" && (<p className="mt-3 text-xs text-[#6f6a64]">{t("payment.fullAmountDebited")}</p>)}
 
           {!paymentMethod && depositRequired && (
-            <p className="mt-3 text-xs text-[#9a9590]"><span className="font-medium text-[#2F3A2E]">Acompte {depositPercentage}%</span> • Vous choisissez ci-dessous</p>
+            <p className="mt-3 text-xs text-[#9a9590]"><span className="font-medium text-[#2F3A2E]">{tUi("depositPct", { pct: depositPercentage })}</span> • {tUi("chooseBelow")}</p>
           )}
         </div>
 

@@ -10,6 +10,7 @@ import CardBotanicalSprigs from "@/components/reservation/CardBotanicalSprigs";
 
 export default function StaffStep({ data, updateData, nextStep }) {
   const t = useTranslations("reservationSteps");
+  const tUi = useTranslations("bookingUi");
   const [staffList, setStaffList] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -53,7 +54,7 @@ export default function StaffStep({ data, updateData, nextStep }) {
     <div>
       <div className="mb-6">
         <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.22em] text-[#b89664]">{data.service?.name ?? t("staff.title")}</p>
-        <h2 className="font-display text-[1.7rem] font-semibold leading-tight tracking-tight text-[#2F3A2E]">Choisissez votre experte</h2>
+        <h2 className="font-display text-[1.7rem] font-semibold leading-tight tracking-tight text-[#2F3A2E]">{tUi("chooseExpert")}</h2>
         <p className="mt-2 max-w-xl text-[13px] leading-relaxed text-[#6f6a64]">{t("staff.subtitle", { name: data.service?.name, count: staffList.length })}</p>
         <div className="mt-3 h-px w-10 bg-[#b89664]/20" />
       </div>

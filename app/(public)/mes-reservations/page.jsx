@@ -6,10 +6,14 @@ import MyReservationsClient from "@/components/customer/MyReservationsClient";
 
 import { getTranslations } from "next-intl/server";
 
-export const metadata = {
-  title: "Mes réservations – Meri Beauty",
-  description: "Consultez et gérez vos rendez-vous Meri Beauty.",
-};
+// Titre traduit selon la langue choisie (cookie NEXT_LOCALE) — MB-008.
+export async function generateMetadata() {
+  const t = await getTranslations("pageMeta");
+  return {
+    title: t("myReservationsTitle"),
+    description: t("myReservationsDescription"),
+  };
+}
 
 /**
  * /mes-reservations

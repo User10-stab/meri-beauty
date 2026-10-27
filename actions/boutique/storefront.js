@@ -110,6 +110,12 @@ export async function getStorefrontProducts({
   subcategorySlug,
   brandId,
   sort = "newest",
+  // Pagination optionnelle (audit 2026-10 : 287 cartes + 287 images d'un coup,
+  // 1,07 Mo sur smartphone). Sans `limit`, comportement historique : tout le
+  // catalogue. Le tri par prix se fait en JS sur `priceFrom` (dérivé des
+  // variantes), donc on découpe APRÈS le tri plutôt qu'avec skip/take Prisma.
+  offset = 0,
+  limit,
 } = {}) {
   try {
     const where = {
@@ -151,7 +157,17 @@ export async function getStorefrontProducts({
     if (sort === "price-asc") cards = cards.sort((a, b) => a.priceFrom - b.priceFrom);
     if (sort === "price-desc") cards = cards.sort((a, b) => b.priceFrom - a.priceFrom);
 
-    return { success: true, data: cards };
+    const total = cards.length;
+    if (limit !== undefined) {
+      // Action serveur appelable depuis le navigateur : bornes forcées pour
+      // qu'un appel forgé ne puisse pas redemander tout le catalogue d'un coup.
+      const size = Math.min(Math.max(1, Math.trunc(Number(limit)) || 1), 60);
+      const start = Math.max(0, Math.trunc(Number(offset)) || 0);
+      cards = cards.slice(start, start + size);
+      return { success: true, data: cards, total, hasMore: start + cards.length < total };
+    }
+
+    return { success: true, data: cards, total, hasMore: false };
   } catch (error) {
     console.error("[getStorefrontProducts]", error);
     return { success: false, message: "Impossible de charger les produits.", data: [] };

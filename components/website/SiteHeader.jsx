@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import IntentPrefetchLink from "./IntentPrefetchLink";
 import { usePathname } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
 import { UserIcon, BagIcon, MenuIcon, CloseIcon } from "./icons";
@@ -9,18 +10,21 @@ import { useSession, signOut } from "next-auth/react";
 import { AnimatePresence, motion } from "framer-motion";
 import { getCart } from "@/actions/boutique/cart";
 import LocaleSwitcher from "@/components/LocaleSwitcher";
+import { useTranslations } from "next-intl";
 
+// Libellés traduits via messages/*.json → "nav" (clé = labelKey).
 const NAV_LINKS = [
-  { label: "Accueil", href: "/" },
-  { label: "Concept", href: "/concept" },
-  { label: "Prestations", href: "/reservation" },
-  { label: "Boutique", href: "/boutique" },
-  { label: "Évènements & Ateliers", href: "/evenements" },
-  { label: "Formations", href: "/formations" },
-  { label: "Contact", href: "/contact" },
+  { labelKey: "home", href: "/" },
+  { labelKey: "concept", href: "/concept" },
+  { labelKey: "services", href: "/reservation" },
+  { labelKey: "shop", href: "/boutique" },
+  { labelKey: "events", href: "/evenements" },
+  { labelKey: "courses", href: "/formations" },
+  { labelKey: "contact", href: "/contact" },
 ];
 
 export default function Navbar() {
+  const t = useTranslations("nav");
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [cartItemCount, setCartItemCount] = useState(0);
@@ -127,10 +131,10 @@ export default function Navbar() {
       <nav className="mx-auto flex max-w-[1400px] items-center justify-between gap-4 px-4 py-3 md:px-10 lg:grid lg:grid-cols-[auto_1fr_auto] lg:gap-6 lg:px-14">
 
         {/* ── Logo (left) ── */}
-        <Link href="/" className="shrink-0" aria-label="Maison Adar — Accueil">
+        <Link href="/" className="shrink-0" aria-label={t("logoLabel")}>
           <Image
             src="/Images/image.webp"
-            alt="Maison Adar"
+            alt={t("logoAlt")}
             width={156}
             height={110}
             priority
@@ -141,8 +145,8 @@ export default function Navbar() {
         {/* ── Desktop nav links (center) ── */}
         <ul className="hidden items-center justify-center gap-7 lg:flex xl:gap-9">
           {NAV_LINKS.map((link) => (
-            <li key={link.label}>
-              <Link
+            <li key={link.href}>
+              <IntentPrefetchLink
                 href={link.href}
                 className={`font-display relative whitespace-nowrap text-[15px] font-medium tracking-wide transition-colors duration-200
                   ${
@@ -151,8 +155,8 @@ export default function Navbar() {
                       : "text-cream/70 hover:text-cream/95"
                   }`}
               >
-                {link.label}
-              </Link>
+                {t(link.labelKey)}
+              </IntentPrefetchLink>
             </li>
           ))}
         </ul>
@@ -167,7 +171,7 @@ export default function Navbar() {
               href="/dashboard"
               className="ml-2 hidden rounded-full border border-gold px-5 py-2 text-[13px] font-medium text-gold transition-all duration-200 hover:bg-gold hover:text-white sm:inline-flex"
             >
-              Tableau de bord
+              {t("dashboard")}
             </Link>
           )}
 
@@ -175,7 +179,7 @@ export default function Navbar() {
           {isAuthed && !hasDashboardRole && (
             <>
               <button
-                aria-label="Mon profil"
+                aria-label={t("profile")}
                 onClick={() => setMenuOpen((v) => !v)}
                 className="rounded-full p-2 text-cream/70 transition-colors duration-200 hover:text-cream"
                 aria-expanded={menuOpen}
@@ -206,7 +210,7 @@ export default function Navbar() {
                     ref={menuRef}
                     className="absolute right-0 top-full z-50 mt-3 w-60 rounded-2xl bg-white shadow-md ring-1 ring-black/5"
                     role="menu"
-                    aria-label="User menu"
+                    aria-label={t("userMenu")}
                   >
                     <div className="p-4">
                       <div className="flex items-center gap-3">
@@ -226,7 +230,7 @@ export default function Navbar() {
                         )}
                         <div className="min-w-0">
                           <div className="truncate text-sm font-medium text-primary">
-                            {session?.user?.name || "Utilisateur"}
+                            {session?.user?.name || t("user")}
                           </div>
                           <div className="truncate text-xs text-gray-500">
                             {session?.user?.email}
@@ -245,7 +249,7 @@ export default function Navbar() {
                         className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
                         role="menuitem"
                       >
-                        Mes commandes
+                        {t("myOrders")}
                       </a>
                       <a
                         href="/mes-reservations"
@@ -253,7 +257,7 @@ export default function Navbar() {
                         className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
                         role="menuitem"
                       >
-                        Mes rendez-vous
+                        {t("myAppointments")}
                       </a>
                       <a
                         href="/profile"
@@ -261,7 +265,7 @@ export default function Navbar() {
                         className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
                         role="menuitem"
                       >
-                        Mon profil
+                        {t("profile")}
                       </a>
                     </div>
 
@@ -276,7 +280,7 @@ export default function Navbar() {
                         className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50"
                         role="menuitem"
                       >
-                        Déconnexion
+                        {t("logout")}
                       </button>
                     </div>
                   </motion.div>
@@ -288,7 +292,7 @@ export default function Navbar() {
           {/* Bag icon — visible to everyone, guests included, since checkout supports guest orders */}
           <Link
             href="/boutique/cart"
-            aria-label={`Mon panier${cartItemCount > 0 ? ` (${cartItemCount} article${cartItemCount > 1 ? "s" : ""})` : ""}`}
+            aria-label={cartItemCount > 0 ? t("cartWithCount", { count: cartItemCount }) : t("cart")}
             className="relative rounded-full p-2 text-cream/70 transition-colors duration-200 hover:text-cream"
           >
             <BagIcon className="h-[18px] w-[18px]" />
@@ -305,13 +309,13 @@ export default function Navbar() {
               href="/login"
               className="ml-2 hidden rounded-full border border-gold px-5 py-2 text-[13px] font-medium text-gold bg-white/5 transition-all duration-200 hover:bg-gold hover:text-primary sm:inline-flex"
             >
-              Se connecter
+              {t("signIn")}
             </Link>
           )}
 
           {/* Mobile hamburger */}
           <button
-            aria-label={open ? "Fermer le menu" : "Ouvrir le menu"}
+            aria-label={open ? t("closeMenu") : t("openMenu")}
             onClick={() => setOpen((v) => !v)}
             className="ml-1 rounded-full p-2 text-cream/80 lg:hidden"
           >
@@ -328,15 +332,15 @@ export default function Navbar() {
       >
         <ul className="flex flex-col px-6 pb-6 pt-1">
           {NAV_LINKS.map((link) => (
-            <li key={link.label}>
-              <Link
+            <li key={link.href}>
+              <IntentPrefetchLink
                 href={link.href}
                 onClick={() => setOpen(false)}
                 className={`font-display block border-b border-cream/10 py-3.5 text-[15px] font-medium tracking-wide transition-colors
                   ${isActiveLink(link.href) ? "text-gold" : "text-cream/70 hover:text-cream"}`}
               >
-                {link.label}
-              </Link>
+                {t(link.labelKey)}
+              </IntentPrefetchLink>
             </li>
           ))}
           {/* CTA inside mobile menu too — nothing shown here for an
@@ -350,7 +354,7 @@ export default function Navbar() {
                   onClick={() => setOpen(false)}
                   className="inline-flex w-full justify-center rounded-full border border-gold px-6 py-2.5 text-[13px] font-medium text-gold transition-all hover:bg-gold hover:text-primary"
                 >
-                  Tableau de bord
+                  {t("dashboard")}
                 </Link>
               ) : (
                 <Link
@@ -358,7 +362,7 @@ export default function Navbar() {
                   onClick={() => setOpen(false)}
                   className="inline-flex w-full justify-center rounded-full border border-gold px-6 py-2.5 text-[13px] font-medium text-gold transition-all hover:bg-gold hover:text-primary"
                 >
-                  Se connecter
+                  {t("signIn")}
                 </Link>
               )}
             </li>

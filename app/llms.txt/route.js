@@ -103,7 +103,7 @@ function buildSalonFacts(salon) {
 function buildLlmsTxt({ salon, categories, activities, formations }) {
   const sections = [
     "# Meri Beauty",
-    "> Salon de beauté & bien-être à Jette, Bruxelles (Belgique) : coiffure, soins visage, manucure, massage et rituels corps, avec une boutique de produits de beauté, des ateliers et des formations professionnelles sous un même toit. Réservation et paiement en ligne.",
+    "> Salon de beauté & bien-être à Jette, Bruxelles (Belgique) : beauté des pieds et des mains, soins du visage, épilations et massages, avec une boutique de produits de beauté, des ateliers et des formations professionnelles sous un même toit. Réservation et paiement en ligne.",
     "Le site est en français. Les prix affichés sont TTC (TVA belge incluse). Les rendez-vous, ateliers et formations se réservent en ligne ; la boutique livre en Belgique et propose le retrait au salon.",
     buildSalonFacts(salon).join("\n"),
     [

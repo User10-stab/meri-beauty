@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getPublicAnimatorById } from "@/actions/workshops/get-public-animators";
 import { ActivityPriceTag } from "@/components/activities/ActivityPrice";
+import { getTranslations } from "next-intl/server";
 
 export async function generateMetadata({ params }) {
   const { id } = await params;
@@ -9,7 +10,8 @@ export async function generateMetadata({ params }) {
   const animator = result.data;
 
   if (!animator) {
-    return { title: "Animateur introuvable — Meri Beauty" };
+    const t = await getTranslations("animateurs");
+    return { title: t("metadataNotFound") };
   }
 
   return {

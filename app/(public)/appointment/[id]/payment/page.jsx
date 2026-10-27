@@ -3,8 +3,15 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { verifyAppointmentConfirmToken } from "@/lib/appointment-confirm-token";
 import ConfirmAcceptedAppointmentClient from "@/components/appointment/ConfirmAcceptedAppointmentClient";
+import { getTranslations } from "next-intl/server";
 
 export const dynamic = "force-dynamic";
+
+// Titre traduit selon la langue choisie (cookie NEXT_LOCALE) — MB-008.
+export async function generateMetadata() {
+  const t = await getTranslations("pageMeta");
+  return { title: t("appointmentPaymentTitle"), robots: { index: false, follow: false } };
+}
 
 export default async function AcceptedAppointmentPaymentPage({ params, searchParams }) {
   const session = await auth();

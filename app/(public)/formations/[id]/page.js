@@ -5,6 +5,7 @@ import { ActivityPriceTag, ActivityDepositNote } from "@/components/activities/A
 import { getAppBaseUrl } from "@/lib/site-url";
 import { formatDurationShort } from "@/lib/format-duration";
 import { customDateDayCount } from "@/lib/formations/custom-date-availability";
+import { getTranslations } from "next-intl/server";
 
 const SITE_URL = getAppBaseUrl();
 
@@ -14,7 +15,8 @@ export async function generateMetadata({ params }) {
   const formation = result.data;
 
   if (!formation) {
-    return { title: "Formation introuvable — Meri Beauty" };
+    const t = await getTranslations("formationDetail");
+    return { title: t("metadataNotFound") };
   }
 
   return {

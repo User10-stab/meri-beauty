@@ -128,7 +128,7 @@ export function InvoiceDocument({ invoice, contact = null, rental = null }) {
               { label: "Devise", value: "Euro (EUR)" },
               contact?.rib ? { label: "Compte bancaire (RIB)", value: contact.rib } : null,
               contact?.email ? { label: "Questions sur cette facture", value: contact.email } : null,
-              contact?.website ? { label: "Conditions générales", value: `${contact.website}/conditions-generales` } : null,
+              contact?.website ? { label: "Conditions générales", value: `${contact.website}/cgv` } : null,
             ].filter(Boolean)}
           />
           <TotalsBlock

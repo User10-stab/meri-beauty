@@ -146,7 +146,7 @@ export default async function EvenementDetailPage({ params }) {
     notFound();
   }
 
-  const [t, tx, locale] = await Promise.all([getTranslations("evenementDetail"), getTranslations("detailPages"), getLocale()]);
+  const [t, locale] = await Promise.all([getTranslations("evenementDetail"), getLocale()]);
   const depositPct = activity.depositPercentage ?? 50;
   const isWorkshop = activity.type === "WORKSHOP";
 
@@ -374,7 +374,7 @@ export default async function EvenementDetailPage({ params }) {
                     <div>
                       <ActivityPriceTag priceTtc={activity.price} className="text-sm font-semibold text-ink" />
                       <p className="text-xs text-ink/45">
-                        {depositPct > 0 ? t("priceWithDeposit", { pct: depositPct }) : tx("price")}
+                        {depositPct > 0 ? t("priceWithDeposit", { pct: depositPct }) : t("price")}
                       </p>
                     </div>
                   </li>

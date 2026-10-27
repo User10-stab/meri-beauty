@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { getFormationCustomDateMonth, getFormationCustomDateSlots } from "@/actions/formations/custom-dates";
+import { useLocale, useTranslations } from "next-intl";
+import { toIntlLocale } from "@/lib/intl-locale";
 
 /**
  * « Date libre » picker for a private formation: the client picks the first
@@ -13,7 +15,11 @@ import { getFormationCustomDateMonth, getFormationCustomDateSlots } from "@/acti
  * re-validates the choice against those same days.
  */
 
-const WEEK_DAYS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
+// Jours lun → dim dans la langue choisie (le 2 janvier 2023 est un lundi).
+function weekDayLabels(locale) {
+  const fmt = new Intl.DateTimeFormat(toIntlLocale(locale), { weekday: "short", timeZone: "UTC" });
+  return Array.from({ length: 7 }, (_, i) => fmt.format(new Date(Date.UTC(2023, 0, i + 2, 12))).replace(".", ""));
+}
 const pad = (n) => String(n).padStart(2, "0");
 
 /** A "YYYY-MM-DD" calendar day, read as itself whatever the browser's zone. */
@@ -22,8 +28,9 @@ function dayDate(dateKey) {
   return new Date(Date.UTC(y, m - 1, d, 12));
 }
 
-export function formatDateKey(dateKey, options = { weekday: "long", day: "numeric", month: "long", year: "numeric" }) {
-  return dayDate(dateKey).toLocaleDateString("fr-FR", { ...options, timeZone: "UTC" });
+// `locale` : locale next-intl ("fr" | "nl" | "en") ; fr par défaut.
+export function formatDateKey(dateKey, options = { weekday: "long", day: "numeric", month: "long", year: "numeric" }, locale = "fr") {
+  return dayDate(dateKey).toLocaleDateString(toIntlLocale(locale), { ...options, timeZone: "UTC" });
 }
 
 export function nextDateKey(dateKey) {
@@ -82,6 +89,8 @@ export function CustomDatePicker({
   loadMonth = getFormationCustomDateMonth,
   loadSlots = getFormationCustomDateSlots,
 }) {
+  const t = useTranslations("customDatePicker");
+  const locale = useLocale();
   const firstMonth = currentMonthKey();
   const [monthKey, setMonthKey] = useState(firstMonth);
   const [monthDays, setMonthDays] = useState(null); // null = loading
@@ -98,7 +107,7 @@ export function CustomDatePicker({
     loadMonth(formationId, monthKey).then((result) => {
       if (!active) return;
       if (!result.success) {
-        setLoadError(result.message || "Impossible de charger les disponibilités.");
+        setLoadError(result.message || t("loadError"));
         setMonthDays({});
         return;
       }
@@ -108,7 +117,7 @@ export function CustomDatePicker({
     return () => {
       active = false;
     };
-  }, [formationId, monthKey, loadMonth]);
+  }, [formationId, monthKey, loadMonth, t]);
 
   useEffect(() => {
     if (!dateKey) return;
@@ -151,7 +160,7 @@ export function CustomDatePicker({
   const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
   // Monday-first grid.
   const leadingBlanks = (new Date(Date.UTC(year, month - 1, 1)).getUTCDay() + 6) % 7;
-  const monthLabel = new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString("fr-FR", {
+  const monthLabel = new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString(toIntlLocale(locale), {
     month: "long",
     year: "numeric",
     timeZone: "UTC",
@@ -166,7 +175,7 @@ export function CustomDatePicker({
         <div className="mb-3 flex items-center justify-between">
           <button
             type="button"
-            aria-label="Mois précédent"
+            aria-label={t("prevMonth")}
             onClick={() => setMonthKey(shiftMonth(monthKey, -1))}
             disabled={monthKey <= firstMonth}
             className="flex h-8 w-8 items-center justify-center rounded-full border border-ink/15 text-ink transition-colors hover:border-gold/40 hover:bg-gold/10 disabled:cursor-not-allowed disabled:opacity-30"
@@ -176,7 +185,7 @@ export function CustomDatePicker({
           <span data-testid="custom-date-month" className="text-sm font-semibold capitalize text-ink">{monthLabel}</span>
           <button
             type="button"
-            aria-label="Mois suivant"
+            aria-label={t("nextMonth")}
             onClick={() => setMonthKey(shiftMonth(monthKey, 1))}
             disabled={monthKey >= shiftMonth(firstMonth, 12)}
             className="flex h-8 w-8 items-center justify-center rounded-full border border-ink/15 text-ink transition-colors hover:border-gold/40 hover:bg-gold/10 disabled:cursor-not-allowed disabled:opacity-30"
@@ -186,7 +195,7 @@ export function CustomDatePicker({
         </div>
 
         <div className="grid grid-cols-7 gap-1 text-center">
-          {WEEK_DAYS.map((label) => (
+          {weekDayLabels(locale).map((label) => (
             <span key={label} className="pb-1 text-[10px] font-semibold uppercase tracking-wide text-ink/40">
               {label}
             </span>
@@ -206,7 +215,7 @@ export function CustomDatePicker({
                 data-free={free ? "true" : "false"}
                 disabled={!free}
                 aria-pressed={selected}
-                aria-label={formatDateKey(key)}
+                aria-label={formatDateKey(key, undefined, locale)}
                 onClick={() => pickDate(key)}
                 className={`flex h-9 items-center justify-center rounded-lg text-sm transition-colors ${
                   selected
@@ -224,13 +233,13 @@ export function CustomDatePicker({
 
         {monthDays === null && (
           <p className="mt-3 flex items-center gap-2 text-xs text-ink/50">
-            <Loader2 size={14} className="animate-spin" /> Chargement des disponibilités…
+            <Loader2 size={14} className="animate-spin" /> {t("loadingAvailability")}
           </p>
         )}
         {loadError && <p className="mt-3 text-xs text-red-600">{loadError}</p>}
         {monthDays !== null && !loadError && Object.keys(monthDays).length === 0 && (
           <p data-testid="custom-date-month-empty" className="mt-3 text-xs text-ink/50">
-            Aucune disponibilité ce mois-ci. Essayez le mois suivant.
+            {t("monthEmpty")}
           </p>
         )}
       </div>
@@ -239,35 +248,35 @@ export function CustomDatePicker({
       {dateKey && (
         <div className="space-y-4 border-t border-ink/8 pt-4">
           <p className="text-sm text-ink/70">
-            <span className="font-semibold capitalize text-ink">{formatDateKey(dateKey)}</span>
+            <span className="font-semibold capitalize text-ink">{formatDateKey(dateKey, undefined, locale)}</span>
           </p>
 
           {loadingSlots || slots === null ? (
             <p className="flex items-center gap-2 text-xs text-ink/50">
-              <Loader2 size={14} className="animate-spin" /> Chargement des horaires…
+              <Loader2 size={14} className="animate-spin" /> {t("loadingTimes")}
             </p>
           ) : times.length === 0 ? (
             <p data-testid="custom-date-no-times" className="text-xs text-ink/50">
-              Cette date n&apos;est plus disponible. Choisissez-en une autre.
+              {t("dateGone")}
             </p>
           ) : (
             <div data-testid="custom-date-choice" data-days={days} className="rounded-lg border border-gold bg-gold/5 px-3 py-2.5 text-sm">
               <span className="block font-medium text-ink">
-                {days} journée{days > 1 ? "s" : ""} · {times[0]} – {endTimeOf(times[0], perDayMinutes())}
-                {days > 1 ? " chaque jour" : ""}
+                {t("daysCount", { count: days })} · {times[0]} – {endTimeOf(times[0], perDayMinutes())}
+                {days > 1 ? ` ${t("eachDay")}` : ""}
               </span>
               {days > 1 && (
                 <ul data-testid="custom-date-days" className="mt-1.5 space-y-0.5 text-xs capitalize text-ink/70">
                   {dates.map((key, index) => (
                     <li key={key} data-date={key}>
-                      <span className="normal-case text-ink/45">Journée {index + 1} · </span>
-                      {formatDateKey(key, { weekday: "long", day: "numeric", month: "long" })}
+                      <span className="normal-case text-ink/45">{t("dayN", { index: index + 1 })} · </span>
+                      {formatDateKey(key, { weekday: "long", day: "numeric", month: "long" }, locale)}
                     </li>
                   ))}
                 </ul>
               )}
               <span className="mt-1 block text-xs text-ink/50">
-                formation de {formatMinutes(Number(durationMinutes))} au total
+                {t("totalDuration", { duration: formatMinutes(Number(durationMinutes)) })}
               </span>
             </div>
           )}

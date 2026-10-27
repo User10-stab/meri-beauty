@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { hasUiText } from "./helpers/ui-text.js";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const source = (path) => readFileSync(`${root}${path}`, "utf8");
@@ -37,7 +38,7 @@ describe("paid order cancellation requests", () => {
 
   test("the account exposes no cancellation for an unfinished payment", () => {
     expect(account).toContain('const CUSTOMER_CANCELLABLE_STATUSES = ["PENDING_PICKUP"]');
-    expect(account).toContain("Cette tentative de paiement sera automatiquement annulée");
-    expect(account).toContain("Demander l&apos;annulation");
+    expect(hasUiText(account, "Cette tentative de paiement sera automatiquement annulée")).toBe(true);
+    expect(hasUiText(account, "Demander l&apos;annulation")).toBe(true);
   });
 });

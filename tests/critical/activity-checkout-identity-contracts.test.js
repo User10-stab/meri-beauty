@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { hasUiText } from "./helpers/ui-text.js";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const source = (path) => readFileSync(`${root}${path}`, "utf8");
@@ -27,8 +28,9 @@ describe("activity checkout identity", () => {
     expect(page).toContain("authedUser.fullName");
     expect(page).toContain("result.data.phone || prev.phone");
     expect(page).not.toContain('phone: "",\n      }));');
-    expect(page).toContain('requiredErrors.phone = "Le numéro de téléphone est obligatoire."');
-    expect(page).toContain("Veuillez compléter les champs indiqués avant de continuer.");
+    expect(page).toMatch(/requiredErrors\.phone = ("Le numéro de téléphone est obligatoire\."|t\("errPhoneRequired"\))/);
+    expect(hasUiText(page, "Le numéro de téléphone est obligatoire.")).toBe(true);
+    expect(hasUiText(page, "Veuillez compléter les champs indiqués avant de continuer.")).toBe(true);
     expect(page.match(/name="fullName"/g)).toHaveLength(1);
     expect(page).toContain("noValidate");
   });

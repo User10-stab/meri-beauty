@@ -3164,6 +3164,7 @@
     "new": "Nieuw"
   },
   "bookingUi": {
+    "continueAcceptsTerms": "Door verder te gaan, aanvaardt u onze <cgv>algemene voorwaarden</cgv> en ons <privacy>privacybeleid</privacy>.",
     "unavailable": "Niet beschikbaar",
     "servicesCount": "{count, plural, one {# behandeling} other {# behandelingen}}",
     "discoverServices": "Ontdek onze behandelingen",

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { hasUiText } from "./helpers/ui-text.js";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const source = (path) => readFileSync(`${root}${path}`, "utf8");
@@ -65,7 +66,7 @@ describe("late cancellation exception requests", () => {
     expect(myReservations).toContain("cancellationRequest:");
     expect(customerUi).toContain("hasPendingRequest");
     expect(customerUi).toContain("hasRejectedRequest");
-    expect(customerUi).toContain("Envoyer une nouvelle demande");
+    expect(hasUiText(customerUi, "Envoyer une nouvelle demande")).toBe(true);
   });
 
   test("a rejected request is reopened atomically and its previous decision is audited", () => {

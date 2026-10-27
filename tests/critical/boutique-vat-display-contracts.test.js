@@ -24,15 +24,16 @@ describe("boutique VAT display matches server charging", () => {
 
   test("checkout shows HT, carriage, VAT and TTC — while cart stays delivery-free", () => {
     const checkout = source("components/boutique/CheckoutPageClient.jsx");
-    for (const label of ["Sous-total HT", "Livraison HT", "TVA (", "Total TTC"]) {
-      expect(checkout, `checkout summary is missing "${label}"`).toContain(label);
+    // Libellés passés par text(fr, en, nl) depuis la traduction NL/EN (MB-008).
+    for (const label of ['text("Sous-total HT"', 'text("Livraison HT"', 'text("TVA"', 'text("Total TTC"']) {
+      expect(checkout, `checkout summary is missing ${label}`).toContain(label);
     }
     // Order matters: the price is built from the net side up, and the invoice
     // issued for this order prints the same four figures in the same order.
     const at = (needle) => checkout.indexOf(needle);
-    expect(at("Sous-total HT")).toBeLessThan(at("Livraison HT"));
-    expect(at("Livraison HT")).toBeLessThan(at(">TVA ("));
-    expect(at(">TVA (")).toBeLessThan(at("Total TTC"));
+    expect(at('text("Sous-total HT"')).toBeLessThan(at('text("Livraison HT"'));
+    expect(at('text("Livraison HT"')).toBeLessThan(at('text("TVA"'));
+    expect(at('text("TVA"')).toBeLessThan(at('text("Total TTC"'));
 
     const cart = source("components/boutique/CartPageClient.jsx");
     expect(cart).not.toContain('t("shippingExclVat")');

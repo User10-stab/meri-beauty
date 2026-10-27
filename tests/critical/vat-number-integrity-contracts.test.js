@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createRentalRequestSchema, updateRentalRequestSchema } from "../../lib/validations/rental-request.js";
+import { hasUiText } from "./helpers/ui-text.js";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const source = (path) => readFileSync(`${root}${path}`, "utf8");
@@ -230,7 +231,7 @@ describe("a VAT number is never stored apart from its verification proof", () =>
     const content = source(file);
     expect(content).toContain("hasSavedVatProof");
     expect(content).toContain('href="/profile"');
-    expect(content).toContain("90 jours");
+    expect(hasUiText(content, "90 jours")).toBe(true);
   });
 });
 

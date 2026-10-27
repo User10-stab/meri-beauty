@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { hasUiText } from "./helpers/ui-text.js";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 // Normalized to LF: git is configured with core.autocrlf=true and the repo has
@@ -78,18 +79,18 @@ describe("the waiting-list screens explain what joining actually does", () => {
 
   test.each(PAGES)("%s warns before submitting, not only after", (page) => {
     const content = source(page);
-    expect(content).toContain("Cette session est complète — vous rejoignez la liste d&apos;attente");
-    expect(content).toContain("Vous ne payez rien maintenant");
+    expect(hasUiText(content, "Cette session est complète — vous rejoignez la liste d&apos;attente")).toBe(true);
+    expect(hasUiText(content, "Vous ne payez rien maintenant")).toBe(true);
   });
 
   test.each(PAGES)("%s states that a position is not a guaranteed priority", (page) => {
-    expect(source(page)).toContain("votre position n&apos;est pas une priorité garantie");
+    expect(hasUiText(source(page), "votre position n&apos;est pas une priorité garantie")).toBe(true);
   });
 
   test.each(PAGES)("%s distinguishes a repeat submission", (page) => {
     const content = source(page);
     expect(content).toContain("wlSuccess.alreadyOnList");
-    expect(content).toContain("Vous étiez déjà sur la liste d'attente");
+    expect(hasUiText(content, "Vous étiez déjà sur la liste d'attente")).toBe(true);
   });
 });
 

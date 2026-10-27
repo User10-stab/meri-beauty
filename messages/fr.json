@@ -3164,6 +3164,7 @@
     "new": "Nouveau"
   },
   "bookingUi": {
+    "continueAcceptsTerms": "En continuant, vous acceptez nos <cgv>conditions générales</cgv> et notre <privacy>politique de confidentialité</privacy>.",
     "unavailable": "Indisponible",
     "servicesCount": "{count, plural, one {# prestation} other {# prestations}}",
     "discoverServices": "Découvrez nos prestations",

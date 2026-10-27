@@ -890,7 +890,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
             </div>
             {discountAmount > 0 && (
               <div className="flex justify-between text-emerald-600">
-                <span>{text("Korting", "Discount", "Korting")} ({appliedPromo.code})</span>
+                <span>{text("Remise", "Discount", "Korting")} ({appliedPromo.code})</span>
                 <span>-€{netTotals.discountNet.toFixed(2)}</span>
               </div>
             )}

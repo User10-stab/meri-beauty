@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { hasUiText } from "./helpers/ui-text.js";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const source = (path) => readFileSync(`${root}${path}`, "utf8").replace(/\r\n/g, "\n");
@@ -38,7 +39,7 @@ describe("a booking field error is always visible, even with no matching input",
       });
 
       test("an account-owned field error tells the customer where to fix it", () => {
-        expect(page).toContain("corrigez-le dans votre profil");
+        expect(hasUiText(page, "corrigez-le dans votre profil")).toBe(true);
       });
     });
   }
@@ -51,13 +52,13 @@ describe("a disabled booking button explains itself", () => {
 
   test("a reason is derived for every blocking condition", () => {
     expect(page).toContain("submitBlockedReason");
-    expect(page).toContain("Cochez l'acceptation des CGV");
-    expect(page).toContain("Cette séance est complète");
+    expect(hasUiText(page, "Cochez l'acceptation des CGV")).toBe(true);
+    expect(hasUiText(page, "Cette séance est complète")).toBe(true);
   });
 
   test("a failed availability lookup no longer leaves available silently at 0", () => {
     // available starts at 0 and only moves on success; without this branch a
     // failed check disabled the button with no explanation at all.
-    expect(page).toContain("Impossible de vérifier les places disponibles");
+    expect(hasUiText(page, "Impossible de vérifier les places disponibles")).toBe(true);
   });
 });

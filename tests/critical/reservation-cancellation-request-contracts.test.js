@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { hasUiText } from "./helpers/ui-text.js";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const source = (path) => readFileSync(`${root}${path}`, "utf8");
@@ -102,8 +103,8 @@ describe("customer sees the policy and a route out instead of a dead end", () =>
   test("the reservation card explains the deposit rule and offers the request", () => {
     const client = source("components/website/MonComptePageClient.jsx");
     expect(client).toContain("submitReservationCancellationRequest");
-    expect(client).toContain("Demander une annulation exceptionnelle");
-    expect(client).toContain("l&apos;acompte reste acquis");
+    expect(hasUiText(client, "Demander une annulation exceptionnelle")).toBe(true);
+    expect(hasUiText(client, "l&apos;acompte reste acquis")).toBe(true);
   });
 
   test("an existing request's state is loaded so the card can reflect it", () => {

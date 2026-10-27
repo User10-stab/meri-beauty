@@ -20,17 +20,14 @@ import { ServicePriceBreakdown } from "@/components/shared/ServicePriceBreakdown
 import { CustomDatePicker, endTimeOf, formatDateKey, perDayMinutes } from "@/components/formations/CustomDatePicker";
 import { isDisposableEmail } from "@/lib/validations/customer-identity";
 import { validatePassword } from "@/lib/validations/password";
-import { useLocale, useTranslations } from "next-intl";
-import { toIntlLocale } from "@/lib/intl-locale";
 import { hasReusableVatValidation, repriceTtcCataloguePrice, resolveServiceVatPolicy } from "@/lib/tax-policy";
 
 // Taken from the signed-in account rather than the form, so this page renders
 // no input for them and a field error on one has nowhere to appear.
 const ACCOUNT_OWNED_FIELDS = ["fullName", "email"];
 
-// Dates et heures dans la langue choisie (MB-008).
-function formatDate(dateStr, locale) {
-  return new Date(dateStr).toLocaleDateString(toIntlLocale(locale), {
+function formatDate(dateStr) {
+  return new Date(dateStr).toLocaleDateString("fr-FR", {
     weekday: "long",
     day: "numeric",
     month: "long",
@@ -39,8 +36,8 @@ function formatDate(dateStr, locale) {
   });
 }
 
-function formatTime(dateStr, locale) {
-  return new Date(dateStr).toLocaleTimeString(toIntlLocale(locale), {
+function formatTime(dateStr) {
+  return new Date(dateStr).toLocaleTimeString("fr-FR", {
     hour: "2-digit",
     minute: "2-digit",
     timeZone: "Europe/Brussels",
@@ -56,8 +53,6 @@ export default function ReservationFormationPage() {
 }
 
 function ReservationFormationContent() {
-  const t = useTranslations("activityBooking");
-  const locale = useLocale();
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const router = useRouter();
@@ -128,7 +123,7 @@ function ReservationFormationContent() {
 
   async function handleVerifyVat() {
     if (!form.vatNumber.trim()) {
-      setFieldErrors((p) => ({ ...p, vatNumber: t("vatEnterFirst") }));
+      setFieldErrors((p) => ({ ...p, vatNumber: "Renseignez d'abord un numéro de TVA." }));
       return;
     }
     setVatCheck({ loading: true });
@@ -141,9 +136,9 @@ function ReservationFormationContent() {
       valid: result.valid,
       message: result.valid
         ? result.name
-          ? t("vatActiveNamed", { name: result.name })
-          : t("vatActive")
-        : t("vatNotRecognized"),
+          ? `Actif — enregistré au nom de « ${result.name} ».`
+          : "Actif dans le registre VIES."
+        : "Ce numéro n'est pas reconnu par le registre européen VIES.",
     });
     if (result.valid) {
       setSavedVatProfile({ isCompany: true, vatNumber: form.vatNumber, vatValidatedAt: new Date().toISOString() });
@@ -169,9 +164,9 @@ function ReservationFormationContent() {
     async function loadCustom() {
       const formResult = await getPublicFormationById(formationId);
       if (!formResult.success || !formResult.data) {
-        setError(t("formationNotFound"));
+        setError("Formation introuvable.");
       } else if (formResult.data.type !== "PRIVATE" || !formResult.data.customDatesEnabled) {
-        setError(t("noCustomDate"));
+        setError("Cette formation ne peut pas être réservée à une date libre.");
       } else {
         setFormation(formResult.data);
         setSeats(1);
@@ -188,14 +183,14 @@ function ReservationFormationContent() {
       ]);
 
       if (!formResult.success || !formResult.data) {
-        setError(t("formationNotFound"));
+        setError("Formation introuvable.");
         setLoading(false);
         return;
       }
 
       const sess = formResult.data.sessions?.find((s) => s.id === sessionId);
       if (!sess) {
-        setError(t("sessionNotFound"));
+        setError("Session introuvable.");
         setLoading(false);
         return;
       }
@@ -228,7 +223,7 @@ function ReservationFormationContent() {
         if (priorityRes.valid) {
           setPriorityValid(true);
         } else {
-          setPriorityMessage(priorityRes.message || t("priorityLinkInvalid"));
+          setPriorityMessage(priorityRes.message || "Lien d'accès prioritaire expiré ou invalide.");
         }
       }
 
@@ -304,7 +299,7 @@ function ReservationFormationContent() {
   const chargeAmount = isFullPayment ? discountedTotal : depositAmount;
   const displayBalanceDue = isFullPayment ? 0 : balanceDue;
 
-  const priceFormatted = new Intl.NumberFormat(toIntlLocale(locale), { style: "currency", currency: "EUR" });
+  const priceFormatted = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" });
   const maxSeats = Math.min(Math.max(1, available), 10);
 
   async function handleSubmit(e) {
@@ -313,21 +308,21 @@ function ReservationFormationContent() {
     setFieldErrors({});
 
     const requiredErrors = {};
-    if (!isAuthed && !form.fullName.trim()) requiredErrors.fullName = t("errFullNameRequired");
-    if (!form.email.trim()) requiredErrors.email = t("errEmailRequired");
-    if (!form.phone.trim()) requiredErrors.phone = t("errPhoneRequired");
+    if (!isAuthed && !form.fullName.trim()) requiredErrors.fullName = "Le nom complet est obligatoire.";
+    if (!form.email.trim()) requiredErrors.email = "L'adresse e-mail est obligatoire.";
+    if (!form.phone.trim()) requiredErrors.phone = "Le numéro de téléphone est obligatoire.";
     if (!isAuthed && emailStatus !== "exists") {
       const passwordIssue = validatePassword(form.password);
-      if (passwordIssue) requiredErrors.password = t("errPasswordMin");
+      if (passwordIssue) requiredErrors.password = "Le mot de passe doit contenir au moins 8 caractères.";
     }
     if (needsBillingAddress) {
-      if (!form.addressLine1.trim()) requiredErrors.addressLine1 = t("errAddressRequired");
-      if (!form.addressCity.trim()) requiredErrors.addressCity = t("errCityRequired");
-      if (!form.addressPostalCode.trim()) requiredErrors.addressPostalCode = t("errPostalRequired");
+      if (!form.addressLine1.trim()) requiredErrors.addressLine1 = "L'adresse est obligatoire.";
+      if (!form.addressCity.trim()) requiredErrors.addressCity = "La ville est obligatoire.";
+      if (!form.addressPostalCode.trim()) requiredErrors.addressPostalCode = "Le code postal est obligatoire.";
     }
     if (Object.keys(requiredErrors).length > 0) {
       setFieldErrors(requiredErrors);
-      setError(t("errCompleteFields"));
+      setError("Veuillez compléter les champs indiqués avant de continuer.");
       requestAnimationFrame(() => {
         const firstField = Object.keys(requiredErrors)[0];
         document.querySelector(`[name="${firstField}"]`)?.focus();
@@ -336,27 +331,27 @@ function ReservationFormationContent() {
     }
 
     if (!isAuthed && emailStatus === "exists") {
-      setError(t("errEmailExists"));
+      setError("Cette adresse e-mail est déjà associée à un compte. Connectez-vous ci-dessus pour continuer.");
       return;
     }
 
     if (!isAuthed && isDisposableEmail(form.email)) {
-      setFieldErrors({ email: t("errDisposableEmail") });
+      setFieldErrors({ email: "Les adresses e-mail temporaires ne sont pas acceptées." });
       return;
     }
 
     if (!acceptedTerms) {
-      setError(t("errAcceptTerms"));
+      setError("Veuillez accepter les CGV et la politique de confidentialité.");
       return;
     }
 
     if (form.isCompany && !hasSavedVatProof && !form.vatNumber.trim()) {
-      setFieldErrors({ vatNumber: t("errVatRequired") });
+      setFieldErrors({ vatNumber: "Veuillez indiquer votre numéro de TVA, ou repassez sur « Particulier »." });
       return;
     }
 
     if (customMode && !customDate) {
-      setError(t("chooseCustomDateError"));
+      setError("Veuillez choisir votre date, la durée et l'heure de début.");
       document.querySelector('[data-testid="custom-date-picker"]')?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
@@ -394,7 +389,7 @@ function ReservationFormationContent() {
         if (result.field) {
           setFieldErrors({ [result.field]: result.message });
         } else {
-          setError(result.message || t("errWaitingList"));
+          setError(result.message || "Erreur lors de l'inscription à la liste d'attente.");
         }
       }
       setSubmitting(false);
@@ -443,8 +438,8 @@ function ReservationFormationContent() {
       // button. See the same fix in reservation-atelier/page.js.
       setError(
         result.field && isAuthed && ACCOUNT_OWNED_FIELDS.includes(result.field)
-          ? t("errAccountField", { message: result.message })
-          : result.message || t("errBooking")
+          ? `${result.message} Ce champ provient de votre compte : corrigez-le dans votre profil, puis revenez.`
+          : result.message || "Erreur lors de la réservation."
       );
       // A refused date libre was taken meanwhile: drop it so the picker
       // reloads what is still free instead of resubmitting the same slot. A
@@ -460,7 +455,7 @@ function ReservationFormationContent() {
   // Particulier / Entreprise — explicit choice rather than "typing a VAT
   // number implies a business" (same pattern as the boutique checkout).
   const companyToggle = (
-    <div role="radiogroup" aria-label={t("accountType")} className="flex rounded-lg border border-ink/15 p-1">
+    <div role="radiogroup" aria-label="Type de compte" className="flex rounded-lg border border-ink/15 p-1">
       <label
         className={`flex flex-1 cursor-pointer items-center justify-center rounded-md py-1.5 text-xs font-semibold uppercase tracking-wide transition-colors ${
           !form.isCompany ? "bg-ink text-white" : "text-ink/50 hover:text-ink"
@@ -474,7 +469,7 @@ function ReservationFormationContent() {
           onChange={() => setForm((p) => ({ ...p, isCompany: false }))}
           className="sr-only"
         />
-        {t("individual")}
+        Particulier
       </label>
       <label
         className={`flex flex-1 cursor-pointer items-center justify-center rounded-md py-1.5 text-xs font-semibold uppercase tracking-wide transition-colors ${
@@ -489,7 +484,7 @@ function ReservationFormationContent() {
           onChange={() => setForm((p) => ({ ...p, isCompany: true }))}
           className="sr-only"
         />
-        {t("company")}
+        Entreprise
       </label>
     </div>
   );
@@ -505,9 +500,9 @@ function ReservationFormationContent() {
   if (!formation || (!sessionData && !customMode)) {
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center bg-cream gap-4">
-        <p className="text-ink/50">{error || t("sessionUnavailable")}</p>
+        <p className="text-ink/50">{error || "Session non disponible."}</p>
         <Link href="/formations" className="text-sm text-gold hover:underline">
-          {t("backToFormations")}
+          Retour aux formations
         </Link>
       </div>
     );
@@ -520,23 +515,22 @@ function ReservationFormationContent() {
           <CheckCircle size={28} />
         </div>
         <h1 className="text-xl font-bold text-ink">
-          {pendingVerificationEmailFailed ? t("bookingSaved") : t("confirmEmail")}
+          {pendingVerificationEmailFailed ? "Réservation enregistrée" : "Confirmez votre email"}
         </h1>
         {pendingVerificationEmailFailed ? (
           <p className="max-w-md text-sm text-ink/60">
-            {t.rich("emailFailedBody", {
-              email: pendingVerificationEmail,
-              strong: (chunks) => <strong>{chunks}</strong>,
-              link: (chunks) => (
-                <Link href="/verify-email" className="font-semibold text-gold underline hover:text-gold/80">
-                  {chunks}
-                </Link>
-              ),
-            })}
+            Votre réservation est bien enregistrée, mais nous n&apos;avons pas pu envoyer l&apos;e-mail de confirmation à{" "}
+            <strong>{pendingVerificationEmail}</strong> tout de suite.{" "}
+            <Link href="/verify-email" className="font-semibold text-gold underline hover:text-gold/80">
+              Demandez un nouveau lien
+            </Link>{" "}
+            pour activer votre compte et finaliser votre paiement.
           </p>
         ) : (
         <p className="max-w-md text-sm text-ink/60">
-          {t.rich("emailSentBody", { email: pendingVerificationEmail, strong: (chunks) => <strong>{chunks}</strong> })}
+          Nous avons envoyé un lien de confirmation à <strong>{pendingVerificationEmail}</strong>. Cliquez dessus pour
+          activer votre compte — vous reviendrez directement ici pour finaliser votre paiement, avec le mot de passe
+          que vous venez de choisir.
         </p>
         )}
       </div>
@@ -551,19 +545,19 @@ function ReservationFormationContent() {
           className="mb-8 inline-flex items-center gap-2 text-sm font-medium text-ink/50 transition-colors hover:text-gold"
         >
           <ArrowLeft size={16} />
-          {t("backToFormation")}
+          Retour à la formation
         </Link>
 
         <div className="mb-8">
           <span className="mb-3 inline-flex items-center gap-2 rounded-full bg-gold/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-gold">
-            {isPrivate ? t("typePrivate") : t("typeGroup")}
+            {isPrivate ? "Formation privée" : "Formation groupe"}
           </span>
           <h1 className="text-2xl font-bold text-ink sm:text-3xl">{formation.title}</h1>
 
           {priorityValid && (
             <div className="mt-3 inline-flex items-center gap-2 rounded-lg bg-emerald-50 px-3.5 py-2 text-xs font-semibold text-emerald-800 border border-emerald-200">
               <CheckCircle size={16} className="text-emerald-600 shrink-0" />
-              <span>{t("priorityPlace")}</span>
+              <span>Une place s&apos;est libérée ! Finalisez votre réservation rapidement : elle sera attribuée à la première personne qui réserve.</span>
             </div>
           )}
 
@@ -583,23 +577,23 @@ function ReservationFormationContent() {
               </div>
               <h2 className="text-xl font-bold text-ink">
                 {wlSuccess.alreadyOnList
-                  ? t("wlAlready")
-                  : t("wlJoined")}
+                  ? "Vous étiez déjà sur la liste d'attente"
+                  : "Vous êtes inscrit(e) sur la liste d'attente !"}
               </h2>
               <p className="text-sm text-ink/70 max-w-md mx-auto">
                 {wlSuccess.alreadyOnList
-                  ? t("wlAlreadyDesc")
-                  : t("wlEmailSent")}
+                  ? "Votre inscription précédente est toujours active — rien n'a été ajouté en double."
+                  : "Nous vous avons envoyé un email de confirmation."}
               </p>
             </div>
 
             <div className="mx-auto max-w-md rounded-xl border border-ink/8 bg-cream/40 p-4 text-sm">
               <div className="flex items-center justify-between border-b border-ink/8 pb-2.5">
-                <span className="text-ink/60">{t("wlPosition")}</span>
+                <span className="text-ink/60">Votre position</span>
                 <strong className="text-lg font-bold text-gold">#{wlSuccess.position}</strong>
               </div>
               <div className="flex items-center justify-between pt-2.5">
-                <span className="text-ink/60">{t("seatsRequested")}</span>
+                <span className="text-ink/60">Places demandées</span>
                 <strong className="text-ink">{wlSuccess.seatsRequested}</strong>
               </div>
             </div>
@@ -607,26 +601,24 @@ function ReservationFormationContent() {
             {/* The mechanism is deliberately spelled out — see the atelier
                 equivalent: a position is not a guaranteed priority. */}
             <div className="mx-auto max-w-md space-y-2.5 text-sm text-ink/70">
-              <p className="font-semibold text-ink">{t("wlWhatNow")}</p>
+              <p className="font-semibold text-ink">Ce qui se passe maintenant</p>
               <ul className="space-y-2">
                 <li className="flex gap-2.5">
                   <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-gold" />
-                  <span>{t("wlNoPayment")}</span>
+                  <span>Aucun paiement ne vous est demandé pour l&apos;instant, et aucune place n&apos;est bloquée à votre nom.</span>
                 </li>
                 <li className="flex gap-2.5">
                   <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-gold" />
-                  <span>{t.rich("wlEmailAll", { strong: (chunks) => <strong className="font-semibold text-ink">{chunks}</strong> })}</span>
+                  <span>Dès qu&apos;une place se libère, un email part <strong className="font-semibold text-ink">en même temps</strong> à toutes les personnes inscrites.</span>
                 </li>
                 <li className="flex gap-2.5">
                   <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-gold" />
-                  <span>{t("wlFirstCome")}</span>
+                  <span>La place revient à la première personne qui finalise sa réservation et règle l&apos;acompte — votre position n&apos;est pas une priorité garantie.</span>
                 </li>
                 <li className="flex gap-2.5">
                   <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-gold" />
-                  <span>
-                    {t.rich("wlUnsubscribe", {
-                      mail: (chunks) => <a href="mailto:contact@meribeautystudio.com" className="underline hover:text-gold">{chunks}</a>,
-                    })}
+                  <span>Pour vous désinscrire, écrivez-nous à{" "}
+                    <a href="mailto:contact@meribeautystudio.com" className="underline hover:text-gold">contact@meribeautystudio.com</a>.
                   </span>
                 </li>
               </ul>
@@ -637,13 +629,13 @@ function ReservationFormationContent() {
                 href="/formations"
                 className="rounded-full bg-gold px-6 py-2.5 text-sm font-semibold text-white shadow hover:bg-gold/90"
               >
-                {t("seeOtherFormations")}
+                Voir d&apos;autres formations
               </Link>
               <Link
                 href="/mon-compte"
                 className="rounded-full border border-ink/15 px-6 py-2.5 text-sm font-semibold text-ink transition-colors hover:border-gold/40 hover:text-gold"
               >
-                {t("myAccount")}
+                Mon compte
               </Link>
             </div>
           </div>
@@ -659,10 +651,12 @@ function ReservationFormationContent() {
                     <Bell size={18} className="mt-0.5 shrink-0 text-amber-600" />
                     <div className="space-y-2 text-sm text-amber-900/80">
                       <p className="font-semibold text-amber-900">
-                        {t("wlFullTitle")}
+                        Cette session est complète — vous rejoignez la liste d&apos;attente
                       </p>
                       <p>
-                        {t("wlFullDesc")}
+                        Vous ne payez rien maintenant et aucune place n&apos;est bloquée à votre nom.
+                        Si une place se libère, un email part en même temps à toutes les personnes
+                        inscrites : elle revient à la première qui finalise sa réservation.
                       </p>
                     </div>
                   </div>
@@ -672,9 +666,10 @@ function ReservationFormationContent() {
               {/* « Date libre » — day, 1 or 2 journées, start time */}
               {customMode && (
                 <div className="rounded-xl border border-ink/8 bg-white p-5 shadow-sm">
-                  <h2 className="mb-1 text-sm font-semibold text-ink">{t("chooseYourDate")}</h2>
+                  <h2 className="mb-1 text-sm font-semibold text-ink">Choisissez votre date</h2>
                   <p className="mb-4 text-xs text-ink/50">
-                    {t("customDateIntro", { name: formation.animator?.name || t("yourTrainer") })}
+                    Seuls les jours où {formation.animator?.name || "votre formatrice"} est disponible sont proposés.
+                    Votre date est confirmée dès le paiement de l&apos;acompte ou du montant total.
                   </p>
                   <CustomDatePicker
                     key={pickerVersion}
@@ -689,7 +684,7 @@ function ReservationFormationContent() {
               {/* Seats selection — only for group formations */}
               {!isPrivate && (
                 <div className="rounded-xl border border-ink/8 bg-white p-5 shadow-sm">
-                  <h2 className="mb-4 text-sm font-semibold text-ink">{t("seatsTitle")}</h2>
+                  <h2 className="mb-4 text-sm font-semibold text-ink">Nombre de places</h2>
                   <div className="flex items-center gap-4">
                     <button
                       type="button"
@@ -710,8 +705,8 @@ function ReservationFormationContent() {
                     </button>
                     <span className="text-xs text-ink/40">
                       {showWaitingListForm
-                        ? t("seatsRequested")
-                        : t("maxSeats", { count: maxSeats })}
+                        ? "Places demandées"
+                        : `max. ${maxSeats} place${maxSeats > 1 ? "s" : ""} disponible${maxSeats > 1 ? "s" : ""}`}
                     </span>
                   </div>
                 </div>
@@ -720,7 +715,7 @@ function ReservationFormationContent() {
               {/* Payment method */}
               {!showWaitingListForm && (
                 <div className="rounded-xl border border-ink/8 bg-white p-5 shadow-sm">
-                  <h2 className="mb-4 text-sm font-semibold text-ink">{t("paymentMethod")}</h2>
+                  <h2 className="mb-4 text-sm font-semibold text-ink">Mode de paiement</h2>
                   <div className="space-y-2">
                     <button
                       type="button"
@@ -730,8 +725,8 @@ function ReservationFormationContent() {
                       }`}
                     >
                       <span>
-                        <span className="block text-sm font-medium text-ink">{t("payDeposit")}</span>
-                        <span className="block text-xs text-ink/50">{t("payDepositDescOnSite")}</span>
+                        <span className="block text-sm font-medium text-ink">Payer un acompte</span>
+                        <span className="block text-xs text-ink/50">Payez l&apos;acompte maintenant et le reste sur place.</span>
                       </span>
                       <span className="text-sm font-semibold text-ink">{priceFormatted.format(depositAmount)}</span>
                     </button>
@@ -742,7 +737,7 @@ function ReservationFormationContent() {
                         paymentMethod === "FULL" ? "border-gold bg-gold/5" : "border-ink/10 hover:border-ink/20"
                       }`}
                     >
-                      <span className="block text-sm font-medium text-ink">{t("payFull")}</span>
+                      <span className="block text-sm font-medium text-ink">Payer le montant total</span>
                       <span className="text-sm font-semibold text-ink">{priceFormatted.format(totalPrice)}</span>
                     </button>
                   </div>
@@ -752,24 +747,24 @@ function ReservationFormationContent() {
               {/* Non-refundable notice */}
               {!showWaitingListForm && (
                 <div className="rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-xs leading-relaxed text-red-800">
-                  {t("nonRefundable")}
+                  ⚠️ L&apos;acompte et le solde ne sont remboursables en aucun cas, que vous participiez ou non à la formation.
                 </div>
               )}
 
               {/* Customer info */}
               <div className="rounded-xl border border-ink/8 bg-white p-5 shadow-sm space-y-4">
-                <h2 className="text-sm font-semibold text-ink">{t("yourDetails")}</h2>
+                <h2 className="text-sm font-semibold text-ink">Vos coordonnées</h2>
                 {isAuthed ? (
                   <div className="space-y-2">
                     <div className="flex items-center gap-2 rounded-lg bg-gold/5 px-3 py-2.5">
                       <CheckCircle size={16} className="shrink-0 text-emerald-500" />
                       <span className="text-sm text-ink/70">
-                        {t.rich("signedInAs", { name: form.fullName || form.email, strong: (chunks) => <strong>{chunks}</strong> })}
+                        Connecté en tant que <strong>{form.fullName || form.email}</strong>
                         {form.fullName && form.email ? <span className="text-ink/45"> · {form.email}</span> : null}
                       </span>
                     </div>
                     <div>
-                      <label htmlFor="formation-phone" className="mb-1 block text-xs font-medium text-ink/60">{t("phoneLabel")}</label>
+                      <label htmlFor="formation-phone" className="mb-1 block text-xs font-medium text-ink/60">Téléphone *</label>
                       <input
                         id="formation-phone"
                         name="phone"
@@ -792,15 +787,16 @@ function ReservationFormationContent() {
                           <div className="flex items-start gap-2 rounded-lg bg-emerald-50 px-3 py-2.5 text-emerald-800">
                             <BadgeCheck className="mt-0.5 h-4 w-4 shrink-0" />
                             <div>
-                              <p className="text-sm font-semibold">{t("vatVerified", { vat: form.vatNumber })}</p>
+                              <p className="text-sm font-semibold">TVA {form.vatNumber} vérifiée</p>
                               <p className="mt-0.5 text-xs text-emerald-700">
-                                {t.rich("vatReused", { link: (chunks) => <Link href="/profile" className="underline underline-offset-2">{chunks}</Link> })}
+                                Validation VIES réutilisée pendant 90 jours. Modifiez ce numéro depuis votre{" "}
+                                <Link href="/profile" className="underline underline-offset-2">profil</Link>.
                               </p>
                             </div>
                           </div>
                         ) : (
                         <div>
-                          <label className="mb-1 block text-xs font-medium text-ink/60">{t("vatLabel")}</label>
+                          <label className="mb-1 block text-xs font-medium text-ink/60">Numéro de TVA *</label>
                           <div className="flex gap-2">
                             <input
                               type="text"
@@ -812,7 +808,7 @@ function ReservationFormationContent() {
                                 setSavedVatProfile(null);
                               }}
                               className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.vatNumber ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
-                              placeholder={t("vatPlaceholder")}
+                              placeholder="BE0123456789 ou FRXX123456789"
                             />
                             <button
                               type="button"
@@ -821,7 +817,7 @@ function ReservationFormationContent() {
                               className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-ink/15 px-3 text-xs font-semibold text-ink/60 transition-colors hover:border-gold hover:text-ink disabled:opacity-50"
                             >
                               {vatCheck?.loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldQuestion className="h-3.5 w-3.5" />}
-                              {t("verify")}
+                              Vérifier
                             </button>
                           </div>
                           {fieldErrors.vatNumber && <p className="mt-1 text-xs text-red-600">{fieldErrors.vatNumber}</p>}
@@ -846,7 +842,7 @@ function ReservationFormationContent() {
                         {needsBillingAddress && (
                           <div className="space-y-2 rounded-lg border border-ink/10 bg-ink/[0.02] p-3">
                             <p className="text-xs text-ink/50">
-                              {t("billingRequired")}
+                              Adresse de facturation obligatoire pour une facture d&apos;entreprise.
                             </p>
                             <div>
                               <input
@@ -854,7 +850,7 @@ function ReservationFormationContent() {
                                 value={form.addressLine1}
                                 onChange={(e) => { setForm((p) => ({ ...p, addressLine1: e.target.value })); setFieldErrors((p) => ({ ...p, addressLine1: undefined })); }}
                                 className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.addressLine1 ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
-                                placeholder={t("streetPlaceholder")}
+                                placeholder="Rue et numéro *"
                               />
                               {fieldErrors.addressLine1 && <p className="mt-1 text-xs text-red-600">{fieldErrors.addressLine1}</p>}
                             </div>
@@ -865,7 +861,7 @@ function ReservationFormationContent() {
                                   value={form.addressPostalCode}
                                   onChange={(e) => { setForm((p) => ({ ...p, addressPostalCode: e.target.value })); setFieldErrors((p) => ({ ...p, addressPostalCode: undefined })); }}
                                   className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.addressPostalCode ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
-                                  placeholder={t("postalPlaceholder")}
+                                  placeholder="Code postal *"
                                 />
                                 {fieldErrors.addressPostalCode && <p className="mt-1 text-xs text-red-600">{fieldErrors.addressPostalCode}</p>}
                               </div>
@@ -875,7 +871,7 @@ function ReservationFormationContent() {
                                   value={form.addressCity}
                                   onChange={(e) => { setForm((p) => ({ ...p, addressCity: e.target.value })); setFieldErrors((p) => ({ ...p, addressCity: undefined })); }}
                                   className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.addressCity ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
-                                  placeholder={t("cityPlaceholder")}
+                                  placeholder="Ville *"
                                 />
                                 {fieldErrors.addressCity && <p className="mt-1 text-xs text-red-600">{fieldErrors.addressCity}</p>}
                               </div>
@@ -888,16 +884,16 @@ function ReservationFormationContent() {
                 ) : (
                   <div className="space-y-3">
                     <p className="text-[13px] text-ink/60">
-                      {t("haveAccount")}{" "}
+                      Vous avez déjà un compte ?{" "}
                       <Link
                         href={`/login?callbackUrl=${encodeURIComponent(callbackUrl)}`}
                         className="font-semibold text-ink underline decoration-gold underline-offset-2 transition-colors hover:text-gold"
                       >
-                        {t("signIn")}
+                        Se connecter
                       </Link>
                     </p>
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-ink/60">{t("fullNameLabel")}</label>
+                      <label className="mb-1 block text-xs font-medium text-ink/60">Nom complet *</label>
                       <input
                         name="fullName"
                         type="text"
@@ -905,12 +901,12 @@ function ReservationFormationContent() {
                         value={form.fullName}
                         onChange={(e) => { setForm((p) => ({ ...p, fullName: e.target.value })); setFieldErrors((p) => ({ ...p, fullName: undefined })); }}
                         className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.fullName ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
-                        placeholder={t("fullNamePlaceholder")}
+                        placeholder="Votre nom"
                       />
                       {fieldErrors.fullName && <p className="mt-1 text-xs text-red-600">{fieldErrors.fullName}</p>}
                     </div>
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-ink/60">{t("emailLabel")}</label>
+                      <label className="mb-1 block text-xs font-medium text-ink/60">Email *</label>
                       <div className="relative">
                         <input
                           name="email"
@@ -920,7 +916,7 @@ function ReservationFormationContent() {
                           onChange={(e) => { setForm((p) => ({ ...p, email: e.target.value })); setFieldErrors((p) => ({ ...p, email: undefined })); setEmailStatus(null); }}
                           onBlur={handleEmailBlur}
                           className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.email || emailStatus === "exists" ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
-                          placeholder={t("emailPlaceholder")}
+                          placeholder="votre@email.com"
                         />
                         {checkingEmail && (
                           <div className="absolute inset-y-0 right-3 flex items-center">
@@ -934,7 +930,7 @@ function ReservationFormationContent() {
                     {emailStatus === "exists" ? (
                       <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
                         <p className="text-xs leading-relaxed text-amber-800">
-                          {t("accountExists")}
+                          Un compte existe déjà avec cette adresse e-mail.
                         </p>
                         <Link
                           href={`/login?${new URLSearchParams({
@@ -943,13 +939,13 @@ function ReservationFormationContent() {
                           }).toString()}`}
                           className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-ink px-4 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-ink/80"
                         >
-                          {t("signIn")}
+                          Se connecter
                         </Link>
                       </div>
                     ) : (
                       <>
                         <div>
-                          <label htmlFor="formation-phone" className="mb-1 block text-xs font-medium text-ink/60">{t("phoneLabel")}</label>
+                          <label htmlFor="formation-phone" className="mb-1 block text-xs font-medium text-ink/60">Téléphone *</label>
                           <input
                             id="formation-phone"
                             name="phone"
@@ -966,7 +962,7 @@ function ReservationFormationContent() {
                           {fieldErrors.phone && <p id="formation-phone-error" className="mt-1 text-xs text-red-600">{fieldErrors.phone}</p>}
                         </div>
                         <div>
-                          <label htmlFor="formation-password" className="mb-1 block text-xs font-medium text-ink/60">{t("passwordLabel")}</label>
+                          <label htmlFor="formation-password" className="mb-1 block text-xs font-medium text-ink/60">Mot de passe *</label>
                           <input
                             id="formation-password"
                             name="password"
@@ -976,7 +972,7 @@ function ReservationFormationContent() {
                             value={form.password}
                             onChange={(e) => { setForm((p) => ({ ...p, password: e.target.value })); setFieldErrors((p) => ({ ...p, password: undefined })); }}
                             className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.password ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
-                            placeholder={t("passwordPlaceholder")}
+                            placeholder="8 caractères minimum"
                             aria-invalid={Boolean(fieldErrors.password)}
                             aria-describedby={fieldErrors.password ? "formation-password-error" : undefined}
                           />
@@ -986,7 +982,7 @@ function ReservationFormationContent() {
                         {form.isCompany && (
                           <>
                             <div>
-                              <label className="mb-1 block text-xs font-medium text-ink/60">{t("vatLabel")}</label>
+                              <label className="mb-1 block text-xs font-medium text-ink/60">Numéro de TVA *</label>
                               <div className="flex gap-2">
                                 <input
                                   type="text"
@@ -998,7 +994,7 @@ function ReservationFormationContent() {
                                     setSavedVatProfile(null);
                                   }}
                                   className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.vatNumber ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
-                                  placeholder={t("vatPlaceholder")}
+                                  placeholder="BE0123456789 ou FRXX123456789"
                                 />
                                 <button
                                   type="button"
@@ -1007,7 +1003,7 @@ function ReservationFormationContent() {
                                   className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-ink/15 px-3 text-xs font-semibold text-ink/60 transition-colors hover:border-gold hover:text-ink disabled:opacity-50"
                                 >
                                   {vatCheck?.loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldQuestion className="h-3.5 w-3.5" />}
-                                  {t("verify")}
+                                  Vérifier
                                 </button>
                               </div>
                               {fieldErrors.vatNumber && <p className="mt-1 text-xs text-red-600">{fieldErrors.vatNumber}</p>}
@@ -1031,7 +1027,7 @@ function ReservationFormationContent() {
                             {needsBillingAddress && (
                               <div className="space-y-2 rounded-lg border border-ink/10 bg-ink/[0.02] p-3">
                                 <p className="text-xs text-ink/50">
-                                  {t("billingRequired")}
+                                  Adresse de facturation obligatoire pour une facture d&apos;entreprise.
                                 </p>
                                 <div>
                                   <input
@@ -1039,7 +1035,7 @@ function ReservationFormationContent() {
                                     value={form.addressLine1}
                                     onChange={(e) => { setForm((p) => ({ ...p, addressLine1: e.target.value })); setFieldErrors((p) => ({ ...p, addressLine1: undefined })); }}
                                     className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.addressLine1 ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
-                                    placeholder={t("streetPlaceholder")}
+                                    placeholder="Rue et numéro *"
                                   />
                                   {fieldErrors.addressLine1 && <p className="mt-1 text-xs text-red-600">{fieldErrors.addressLine1}</p>}
                                 </div>
@@ -1050,7 +1046,7 @@ function ReservationFormationContent() {
                                       value={form.addressPostalCode}
                                       onChange={(e) => { setForm((p) => ({ ...p, addressPostalCode: e.target.value })); setFieldErrors((p) => ({ ...p, addressPostalCode: undefined })); }}
                                       className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.addressPostalCode ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
-                                      placeholder={t("postalPlaceholder")}
+                                      placeholder="Code postal *"
                                     />
                                     {fieldErrors.addressPostalCode && <p className="mt-1 text-xs text-red-600">{fieldErrors.addressPostalCode}</p>}
                                   </div>
@@ -1060,7 +1056,7 @@ function ReservationFormationContent() {
                                       value={form.addressCity}
                                       onChange={(e) => { setForm((p) => ({ ...p, addressCity: e.target.value })); setFieldErrors((p) => ({ ...p, addressCity: undefined })); }}
                                       className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.addressCity ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
-                                      placeholder={t("cityPlaceholder")}
+                                      placeholder="Ville *"
                                     />
                                     {fieldErrors.addressCity && <p className="mt-1 text-xs text-red-600">{fieldErrors.addressCity}</p>}
                                   </div>
@@ -1069,7 +1065,7 @@ function ReservationFormationContent() {
                             )}
                           </>
                         )}
-                        <p className="text-xs text-ink/40">{t("accountCreatedNote")}</p>
+                        <p className="text-xs text-ink/40">Votre compte est créé avec le mot de passe choisi ci-dessus.</p>
                       </>
                     )}
                   </div>
@@ -1089,18 +1085,15 @@ function ReservationFormationContent() {
                   className="mt-0.5"
                 />
                 <span>
-                  {t.rich("termsAccept", {
-                    cgv: (chunks) => (
-                      <a href="/cgv" target="_blank" rel="noopener noreferrer" className="underline hover:text-gold">
-                        {chunks}
-                      </a>
-                    ),
-                    privacy: (chunks) => (
-                      <a href="/politique-de-confidentialite" target="_blank" rel="noopener noreferrer" className="underline hover:text-gold">
-                        {chunks}
-                      </a>
-                    ),
-                  })}
+                  J&apos;ai lu et j&apos;accepte les{" "}
+                  <a href="/cgv" target="_blank" rel="noopener noreferrer" className="underline hover:text-gold">
+                    Conditions générales de vente
+                  </a>{" "}
+                  et la{" "}
+                  <a href="/politique-de-confidentialite" target="_blank" rel="noopener noreferrer" className="underline hover:text-gold">
+                    Politique de confidentialité
+                  </a>
+                  .
                 </span>
               </label>
 
@@ -1113,10 +1106,10 @@ function ReservationFormationContent() {
                   {submitting ? (
                     <span className="inline-flex items-center gap-2">
                       <Loader2 size={18} className="animate-spin" />
-                      {t("joining")}
+                      Inscription en cours…
                     </span>
                   ) : (
-                    t("joinWaitingList")
+                    "S'inscrire à la liste d'attente"
                   )}
                 </button>
               ) : (
@@ -1128,21 +1121,21 @@ function ReservationFormationContent() {
                   {submitting ? (
                     <span className="inline-flex items-center gap-2">
                       <Loader2 size={18} className="animate-spin" />
-                      {t("booking")}
+                      Réservation en cours…
                     </span>
                   ) : isFullPayment ? (
-                    t("payFullAmount", { amount: priceFormatted.format(totalPrice) })
+                    `Payer le montant total de ${priceFormatted.format(totalPrice)}`
                   ) : (
-                    t("payDepositAmount", { amount: priceFormatted.format(depositAmount) })
+                    `Payer l'acompte de ${priceFormatted.format(depositAmount)}`
                   )}
                 </button>
               )}
 
               {!showWaitingListForm && (
                 <p className="text-center text-xs text-ink/40">
-                  {t("stripeSecure")} {isFullPayment
-                    ? t("stripeFull")
-                    : t("stripeDeposit")}
+                  Paiement sécurisé par Stripe. {isFullPayment
+                    ? "Vous réglez la totalité aujourd'hui."
+                    : "Vous ne serez débité que du montant de l'acompte."}
                 </p>
               )}
             </form>
@@ -1150,7 +1143,7 @@ function ReservationFormationContent() {
             {/* Sidebar - Summary */}
             <div className="lg:col-span-2">
               <div className="sticky top-24 rounded-xl border border-ink/8 bg-white p-5 shadow-sm space-y-4">
-                <h2 className="text-sm font-semibold text-ink">{t("summary")}</h2>
+                <h2 className="text-sm font-semibold text-ink">Récapitulatif</h2>
 
                 {customMode ? (
                   <div data-testid="custom-date-summary" className="flex items-start gap-3 text-sm">
@@ -1158,25 +1151,25 @@ function ReservationFormationContent() {
                     {customDate ? (
                       <div>
                         {(customDate.days > 1 ? customDate.dates : [customDate.date]).map((key) => (
-                          <p key={key} data-date={key} className="text-ink/80">{formatDateKey(key, undefined, locale)}</p>
+                          <p key={key} data-date={key} className="text-ink/80">{formatDateKey(key)}</p>
                         ))}
                         <p className="text-xs text-ink/50">
                           {customDate.time} – {endTimeOf(customDate.time, perDayMinutes(formation.duration, customDate.days))}
-                          {customDate.days > 1 ? ` ${t("eachDayCount", { count: customDate.days })}` : ` ${t("oneDay")}`}
+                          {customDate.days > 1 ? ` chaque jour · ${customDate.days} journées` : " · 1 journée"}
                         </p>
                       </div>
                     ) : (
-                      <p className="text-ink/50">{t("dateToChoose")}</p>
+                      <p className="text-ink/50">Date à choisir</p>
                     )}
                   </div>
                 ) : (
                 <div className="flex items-start gap-3 text-sm">
                   <Calendar size={16} className="mt-0.5 shrink-0 text-gold" />
                   <div>
-                    <p className="text-ink/80">{formatDate(sessionData.startDate, locale)}</p>
+                    <p className="text-ink/80">{formatDate(sessionData.startDate)}</p>
                     <p className="text-xs text-ink/50">
-                      {formatTime(sessionData.startDate, locale)}
-                      {sessionData.endDate && ` – ${formatTime(sessionData.endDate, locale)}`}
+                      {formatTime(sessionData.startDate)}
+                      {sessionData.endDate && ` – ${formatTime(sessionData.endDate)}`}
                     </p>
                   </div>
                 </div>
@@ -1194,14 +1187,14 @@ function ReservationFormationContent() {
                     vatRate={vatPolicy.vatRate}
                     discountAmount={discountAmount}
                     totalInclVat={discountedTotal}
-                    unitLabel={isPrivate ? t("privateUnitLabel") : null}
+                    unitLabel={isPrivate ? "formation privée" : null}
                   />
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-ink/60">{isFullPayment ? t("totalAmount") : t("depositPct", { pct: depositPct })}</span>
+                    <span className="text-ink/60">{isFullPayment ? "Montant total" : `Acompte (${depositPct}%)`}</span>
                     <span className="font-semibold text-gold">{priceFormatted.format(chargeAmount)}</span>
                   </div>
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-ink/60">{t("balanceOnSite")}</span>
+                    <span className="text-ink/60">Solde à payer sur place</span>
                     <span className="text-ink">{priceFormatted.format(displayBalanceDue)}</span>
                   </div>
                 </div>
@@ -1217,14 +1210,10 @@ function ReservationFormationContent() {
 
                 <div className="rounded-lg bg-gold/5 px-3 py-2.5 text-xs leading-relaxed text-ink/60">
                   {isFullPayment ? (
-                    <>{t.rich("payTodayFull", { amount: priceFormatted.format(discountedTotal), strong: (chunks) => <strong className="text-gold">{chunks}</strong> })}</>
+                    <>Vous réglez aujourd&apos;hui la totalité, soit <strong className="text-gold">{priceFormatted.format(discountedTotal)}</strong>. Aucun solde ne restera à payer.</>
                   ) : (
-                    <>{t.rich("payTodayDeposit", {
-                      deposit: priceFormatted.format(depositAmount),
-                      balance: priceFormatted.format(balanceDue),
-                      strong: (chunks) => <strong className="text-gold">{chunks}</strong>,
-                      muted: (chunks) => <strong className="text-ink/80">{chunks}</strong>,
-                    })}</>
+                    <>Vous ne réglez aujourd&apos;hui que <strong className="text-gold">{priceFormatted.format(depositAmount)}</strong>.
+                    Le solde de <strong className="text-ink/80">{priceFormatted.format(balanceDue)}</strong> sera à payer sur place.</>
                   )}
                 </div>
               </div>

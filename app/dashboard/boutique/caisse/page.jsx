@@ -13,6 +13,7 @@ export default async function CaissePage({ searchParams }) {
   const filterInput = {
     from: typeof params?.from === "string" ? params.from : undefined,
     to: typeof params?.to === "string" ? params.to : undefined,
+    type: typeof params?.type === "string" ? params.type : undefined,
   };
 
   // The "Rapport" (cash-only revenue by category/VAT + reconciliation) is

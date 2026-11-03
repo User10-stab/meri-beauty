@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cashBookFileBaseName } from "@/lib/cash-book/filters";
 import { getCashBookLedger } from "@/actions/dashboard/cash-book";
 import { renderCashBookPdf } from "@/lib/pdf/render";
 
@@ -25,6 +26,7 @@ export async function GET(request) {
   const filterInput = {
     from: searchParams.get("from") || undefined,
     to: searchParams.get("to") || undefined,
+    type: searchParams.get("type") || undefined,
   };
 
   const ledger = await getCashBookLedger(filterInput);
@@ -34,11 +36,10 @@ export async function GET(request) {
   }
 
   const pdf = await renderCashBookPdf({ ledger: ledger.data });
-  const { from, to } = ledger.data.filters;
   return new NextResponse(pdf, {
     headers: {
       "Content-Type": "application/pdf",
-      "Content-Disposition": `inline; filename="livre-de-caisse-${from}_${to}.pdf"`,
+      "Content-Disposition": `inline; filename="${cashBookFileBaseName(ledger.data.filters)}.pdf"`,
       "Cache-Control": "private, no-store",
     },
   });

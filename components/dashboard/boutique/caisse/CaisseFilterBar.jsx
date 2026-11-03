@@ -2,7 +2,8 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTransition } from "react";
-import { CalendarRange, Calendar, RotateCcw } from "lucide-react";
+import { CalendarRange, Calendar, RotateCcw, Filter } from "lucide-react";
+import { CASH_BOOK_KIND_FILTERS } from "@/lib/cash-book/filters";
 
 function toDateOnlyString(date) {
   const year = date.getFullYear();
@@ -17,10 +18,11 @@ const BASE_PATH = "/dashboard/boutique/caisse";
  * Date-range filter for the Livre de caisse — same URL-driven pattern and
  * layout as RecettesFilterBar (components/dashboard/recettes/RecettesFilterBar.jsx):
  * day pickers plus month pickers for a day-to-day or month-to-month range,
- * simplified to drop the method/category pills since the book has none (it's
- * cash-only by definition). The journal and its "Rapport" section render on
- * this one page and share this same filter, so there is only one URL to
- * drive.
+ * minus the method pills since the book has none (it's cash-only by
+ * definition). The "Afficher" pills narrow the journal to the hand-typed
+ * drawer movements (apports/dépenses — see CASH_BOOK_KIND_FILTERS) and
+ * combine with the date range. The journal, its "Rapport" section and the
+ * three exports all read this one URL.
  */
 export function CaisseFilterBar({ filters }) {
   const router = useRouter();
@@ -29,6 +31,8 @@ export function CaisseFilterBar({ filters }) {
 
   const from = filters?.from ?? "";
   const to = filters?.to ?? "";
+  const type = filters?.type ?? null;
+  const typeOptions = [{ value: null, label: "Tout" }, ...Object.entries(CASH_BOOK_KIND_FILTERS).map(([value, f]) => ({ value, label: f.label }))];
 
   function setParams(next) {
     const params = new URLSearchParams(searchParams.toString());
@@ -62,7 +66,7 @@ export function CaisseFilterBar({ filters }) {
     setParams({ to: toDateOnlyString(lastDay) });
   }
 
-  const hasFilters = Boolean(searchParams.get("from")) || Boolean(searchParams.get("to"));
+  const hasFilters = Boolean(searchParams.get("from")) || Boolean(searchParams.get("to")) || Boolean(searchParams.get("type"));
 
   return (
     <div
@@ -136,6 +140,33 @@ export function CaisseFilterBar({ filters }) {
           onChange={(event) => applyToMonth(event.target.value)}
           className="rounded-[7px] border border-stroke bg-transparent px-3 py-2 text-sm outline-none focus:border-primary dark:border-dark-3 dark:bg-dark-2 dark:text-white"
         />
+      </div>
+
+      <div>
+        <span className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-dark-6">
+          <Filter className="h-3.5 w-3.5" strokeWidth={2} />
+          Afficher
+        </span>
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Type d'écritures affichées">
+          {typeOptions.map((option) => {
+            const active = option.value === type;
+            return (
+              <button
+                key={option.value ?? "ALL"}
+                type="button"
+                aria-pressed={active}
+                onClick={() => setParams({ type: option.value })}
+                className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition-colors ${
+                  active
+                    ? "border-[#2f3a2e] bg-[#2f3a2e] text-white dark:border-white dark:bg-white dark:text-dark"
+                    : "border-stroke text-gray-600 hover:border-primary hover:text-primary dark:border-dark-3 dark:text-dark-6"
+                }`}
+              >
+                {option.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {hasFilters && (

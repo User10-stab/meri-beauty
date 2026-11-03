@@ -23,6 +23,7 @@ import { recordCashMovement } from "@/actions/dashboard/cash-movements";
 import { CaisseFilterBar } from "@/components/dashboard/boutique/caisse/CaisseFilterBar";
 import { groupLedgerRowsByDay, formatDayLabel } from "@/lib/cash-book/day-groups";
 import { CASH_MOVEMENT_TYPE_LABELS } from "@/lib/cash-book/movement-types";
+import { CASH_BOOK_KIND_FILTERS, cashBookFileBaseName } from "@/lib/cash-book/filters";
 
 function formatEuro(value) {
   return new Intl.NumberFormat("fr-BE", { style: "currency", currency: "EUR" }).format(value);
@@ -102,19 +103,22 @@ function pieceNumberHref(row) {
  * server, with the ledger's own running balance — exporting this exact
  * payload avoids a second, potentially differently scoped query and
  * guarantees the file matches the figures on screen. Same approach as the
- * Livre de recettes' own downloadRecettesCsv.
+ * Livre de recettes' own downloadRecettesCsv. With the apports/dépenses
+ * filter on, the ledger is already narrowed and the caller passes no report.
  */
 function downloadCaisseCsv({ ledger, report }) {
   const { filters, totals, rows } = ledger;
+  const kindFilter = filters.type ? CASH_BOOK_KIND_FILTERS[filters.type] : null;
   const lines = [
     ["Livre de caisse — Meri Beauty"],
     ["Période", `du ${filters.from} au ${filters.to}`],
+    ...(kindFilter ? [["Filtre", kindFilter.label]] : []),
     ["Exporté le", new Date().toLocaleString("fr-BE")],
     [],
     ["Synthèse", "Montant (€)"],
-    ["Total entrées", totals.entrees],
-    ["Total sorties", totals.sorties],
-    ["Solde", totals.finalBalance],
+    [kindFilter ? "Total apports" : "Total entrées", totals.entrees],
+    [kindFilter ? "Total dépenses" : "Total sorties", totals.sorties],
+    [kindFilter ? "Net (apports − dépenses)" : "Solde", totals.finalBalance],
     ["Nombre d'écritures", rows.length],
   ];
 
@@ -154,7 +158,7 @@ function downloadCaisseCsv({ ledger, report }) {
 
   lines.push(
     [],
-    ["Date", "N° pièce", "Référence", "Désignation", "Entrées (€)", "Sorties (€)", "Solde (€)"],
+    ["Date", "N° pièce", "Référence", "Désignation", "Entrées (€)", "Sorties (€)", kindFilter ? "Cumul (€)" : "Solde (€)"],
     ...rows.map((row) => [
       formatDateTime(row.date),
       row.pieceNumber ?? "",
@@ -173,7 +177,7 @@ function downloadCaisseCsv({ ledger, report }) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `livre-de-caisse-${filters.from}_${filters.to}.csv`;
+  link.download = `${cashBookFileBaseName(filters)}.csv`;
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -213,10 +217,19 @@ export function CaisseClient({
   const dayGroups = useMemo(() => (ledger?.rows ? groupLedgerRowsByDay(ledger.rows) : []), [ledger?.rows]);
 
   const finalBalance = ledger?.totals?.finalBalance ?? currentSession?.expectedCash ?? null;
-  const isZero = finalBalance != null && Math.abs(finalBalance) < 0.005;
+  // A filtered ledger's finalBalance is the apports − dépenses net, not the drawer.
+  const isZero = !ledger?.filters?.type && finalBalance != null && Math.abs(finalBalance) < 0.005;
+
+  // Apports/dépenses filter (see CaisseFilterBar): hides sales, so the
+  // sales-only Rapport is hidden too and the totals read as apports/dépenses.
+  const kindFilter = ledger?.filters?.type ? CASH_BOOK_KIND_FILTERS[ledger.filters.type] : null;
 
   const exportQuery = ledger?.filters
-    ? new URLSearchParams({ from: ledger.filters.from, to: ledger.filters.to }).toString()
+    ? new URLSearchParams({
+        from: ledger.filters.from,
+        to: ledger.filters.to,
+        ...(ledger.filters.type ? { type: ledger.filters.type } : {}),
+      }).toString()
     : "";
 
   function toggleDay(key) {
@@ -280,7 +293,7 @@ export function CaisseClient({
           </a>
           <button
             type="button"
-            onClick={() => ledger && downloadCaisseCsv({ ledger, report })}
+            onClick={() => ledger && downloadCaisseCsv({ ledger, report: kindFilter ? null : report })}
             disabled={!ledger}
             className="inline-flex items-center gap-2 rounded-[7px] border border-stroke bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-50 dark:border-dark-3 dark:bg-gray-dark dark:text-dark-6"
           >
@@ -418,17 +431,17 @@ export function CaisseClient({
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 print:grid-cols-3 print:gap-2">
             <StatCard
               icon={<ArrowUpCircle size={20} />}
-              label="Total entrées"
+              label={kindFilter ? "Total apports" : "Total entrées"}
               value={formatEuro(ledger.totals.entrees)}
             />
             <StatCard
               icon={<ArrowDownCircle size={20} />}
-              label="Total sorties"
+              label={kindFilter ? "Total dépenses" : "Total sorties"}
               value={formatEuro(ledger.totals.sorties)}
             />
             <StatCard
               icon={<Wallet size={20} />}
-              label="Solde"
+              label={kindFilter ? "Net (apports − dépenses)" : "Solde"}
               value={formatEuro(ledger.totals.finalBalance)}
             />
           </div>
@@ -436,7 +449,7 @@ export function CaisseClient({
           <div className="rounded-[10px] border border-stroke bg-white shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card print:border-0 print:shadow-none">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stroke px-6 py-4 dark:border-dark-3 print:px-0">
               <h2 className="text-lg font-bold text-dark dark:text-white">
-                Journal — {ledger.rows.length} mouvement{ledger.rows.length > 1 ? "s" : ""}
+                Journal{kindFilter ? ` — ${kindFilter.label}` : ""} — {ledger.rows.length} mouvement{ledger.rows.length > 1 ? "s" : ""}
               </h2>
               <span className="text-sm text-gray-500 dark:text-dark-6 print:hidden">
                 du {ledger.filters.from} au {ledger.filters.to}
@@ -473,7 +486,7 @@ export function CaisseClient({
         </>
       )}
 
-      {reportError ? (
+      {kindFilter ? null : reportError ? (
         <div role="alert" className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           <span className="mt-0.5 flex-shrink-0 text-lg leading-none">⚠</span>
           {reportError}

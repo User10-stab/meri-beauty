@@ -3,6 +3,7 @@ import path from "node:path";
 import { Document, Page, View, Text, Image, StyleSheet } from "@react-pdf/renderer";
 import { COLORS, money, formatDate } from "./theme";
 import { groupLedgerRowsByDay, formatDayLabel, sumLedgerVat } from "@/lib/cash-book/day-groups";
+import { CASH_BOOK_KIND_FILTERS } from "@/lib/cash-book/filters";
 
 /**
  * The printable Livre de caisse — a real generated PDF (logo, real
@@ -17,6 +18,10 @@ import { groupLedgerRowsByDay, formatDayLabel, sumLedgerVat } from "@/lib/cash-b
  * comparison, session detail) used to be included here too, but the client's
  * explicit ask (14 Sep 2026) is that printing this book stays what it always
  * was to them: the days and their values, nothing else.
+ *
+ * Same document for the apports/dépenses filter (3 Nov 2026): the letterhead
+ * names the filter, the synthèse reads apports/dépenses/net, and the Réf. +
+ * TVA columns are dropped — a drawer movement carries neither.
  */
 const LOGO_BUFFER = fs.readFileSync(path.join(process.cwd(), "public", "Images", "Logo.png"));
 
@@ -146,7 +151,7 @@ const styles = StyleSheet.create({
   colSolde: { flex: 1.2, textAlign: "right" },
 });
 
-function Letterhead({ filters, generatedAt }) {
+function Letterhead({ filters, kindFilter, generatedAt }) {
   return (
     <View style={styles.header} fixed>
       <View style={styles.headerBrand}>
@@ -154,7 +159,7 @@ function Letterhead({ filters, generatedAt }) {
         <Image src={LOGO_BUFFER} style={styles.logo} />
         <View style={styles.headerBrandText}>
           <Text style={styles.headerTitle}>Meri Beauty</Text>
-          <Text style={styles.headerSubtitle}>Livre de caisse</Text>
+          <Text style={styles.headerSubtitle}>Livre de caisse{kindFilter ? ` — ${kindFilter.label}` : ""}</Text>
         </View>
       </View>
       <View style={styles.headerMeta}>
@@ -162,6 +167,12 @@ function Letterhead({ filters, generatedAt }) {
           <Text style={styles.headerMetaLabel}>Période : </Text>
           Du {filters.from} au {filters.to}
         </Text>
+        {kindFilter && (
+          <Text style={styles.headerMetaLine}>
+            <Text style={styles.headerMetaLabel}>Filtre : </Text>
+            {kindFilter.label}
+          </Text>
+        )}
         <Text style={styles.headerMetaLine}>
           <Text style={styles.headerMetaLabel}>Généré le : </Text>
           {formatDateTime(generatedAt)}
@@ -183,24 +194,24 @@ function Footer({ generatedAt }) {
   );
 }
 
-function TableHead() {
+function TableHead({ showVat }) {
   return (
     <View style={styles.tableHead} fixed>
       <Text style={[styles.tableHeadCell, styles.colDate]}>DATE</Text>
       <Text style={[styles.tableHeadCell, styles.colPiece]}>N° PIÈCE</Text>
-      <Text style={[styles.tableHeadCell, styles.colRef]}>RÉF.</Text>
+      {showVat && <Text style={[styles.tableHeadCell, styles.colRef]}>RÉF.</Text>}
       <Text style={[styles.tableHeadCell, styles.colLabel]}>DÉSIGNATION</Text>
-      <Text style={[styles.tableHeadCell, styles.colRate]}>TVA %</Text>
-      <Text style={[styles.tableHeadCell, styles.colHt]}>HT</Text>
-      <Text style={[styles.tableHeadCell, styles.colVat]}>TVA</Text>
+      {showVat && <Text style={[styles.tableHeadCell, styles.colRate]}>TVA %</Text>}
+      {showVat && <Text style={[styles.tableHeadCell, styles.colHt]}>HT</Text>}
+      {showVat && <Text style={[styles.tableHeadCell, styles.colVat]}>TVA</Text>}
       <Text style={[styles.tableHeadCell, styles.colEntree]}>ENTRÉES</Text>
       <Text style={[styles.tableHeadCell, styles.colSortie]}>SORTIES</Text>
-      <Text style={[styles.tableHeadCell, styles.colSolde]}>SOLDE</Text>
+      <Text style={[styles.tableHeadCell, styles.colSolde]}>{showVat ? "SOLDE" : "CUMUL"}</Text>
     </View>
   );
 }
 
-function DataRow({ row, index }) {
+function DataRow({ row, showVat }) {
   const color = ROW_COLORS[row.kind];
   const sortieValue = row.sortie ? (NEGATIVE_DISPLAY_KINDS.has(row.kind) ? -row.sortie : row.sortie) : null;
   return (
@@ -216,11 +227,11 @@ function DataRow({ row, index }) {
         })}
       </Text>
       <Text style={styles.colPiece}>{truncate(row.pieceNumber, 18) || "—"}</Text>
-      <Text style={styles.colRef}>{truncate(row.reference, 14) || "—"}</Text>
+      {showVat && <Text style={styles.colRef}>{truncate(row.reference, 14) || "—"}</Text>}
       <Text style={[styles.colLabel, color && { color }]}>{row.label}</Text>
-      <Text style={styles.colRate}>{row.vatRate != null ? `${row.vatRate} %` : "—"}</Text>
-      <Text style={[styles.colHt, color && { color }]}>{row.amountHt != null ? money(row.amountHt) : "—"}</Text>
-      <Text style={[styles.colVat, color && { color }]}>{row.amountVat != null ? money(row.amountVat) : "—"}</Text>
+      {showVat && <Text style={styles.colRate}>{row.vatRate != null ? `${row.vatRate} %` : "—"}</Text>}
+      {showVat && <Text style={[styles.colHt, color && { color }]}>{row.amountHt != null ? money(row.amountHt) : "—"}</Text>}
+      {showVat && <Text style={[styles.colVat, color && { color }]}>{row.amountVat != null ? money(row.amountVat) : "—"}</Text>}
       <Text style={[styles.colEntree, color && { color }]}>{row.entree ? money(row.entree) : "—"}</Text>
       <Text style={[styles.colSortie, color && { color }]}>{sortieValue != null ? money(sortieValue) : "—"}</Text>
       <Text style={[styles.colSolde, styles.bold]}>{money(row.solde)}</Text>
@@ -228,7 +239,7 @@ function DataRow({ row, index }) {
   );
 }
 
-function DayBlock({ group }) {
+function DayBlock({ group, showVat }) {
   return (
     <View>
       {/* Day header carries only the label — the totals used to be repeated
@@ -240,16 +251,16 @@ function DayBlock({ group }) {
         </Text>
       </View>
       {group.rows.map((row, index) => (
-        <DataRow key={`${row.kind}-${row.pieceNumber ?? index}-${row.date}`} row={row} index={index} />
+        <DataRow key={`${row.kind}-${row.pieceNumber ?? index}-${row.date}`} row={row} showVat={showVat} />
       ))}
       <View style={styles.totalRow} wrap={false}>
         <Text style={styles.colDate} />
         <Text style={styles.colPiece} />
-        <Text style={styles.colRef} />
+        {showVat && <Text style={styles.colRef} />}
         <Text style={[styles.colLabel, styles.bold]}>Total du jour</Text>
-        <Text style={styles.colRate} />
-        <Text style={[styles.colHt, styles.bold]}>{money(group.totalHt)}</Text>
-        <Text style={[styles.colVat, styles.bold]}>{money(group.totalVat)}</Text>
+        {showVat && <Text style={styles.colRate} />}
+        {showVat && <Text style={[styles.colHt, styles.bold]}>{money(group.totalHt)}</Text>}
+        {showVat && <Text style={[styles.colVat, styles.bold]}>{money(group.totalVat)}</Text>}
         <Text style={[styles.colEntree, styles.bold]}>{money(group.totalEntrees)}</Text>
         <Text style={[styles.colSortie, styles.bold]}>{money(group.totalSorties)}</Text>
         <Text style={[styles.colSolde, styles.bold]}>{money(group.closingBalance)}</Text>
@@ -266,45 +277,56 @@ export function CashBookDocument({ ledger, generatedAt }) {
   const { filters, totals, rows } = ledger;
   const dayGroups = groupLedgerRowsByDay(rows);
   const vatTotals = sumLedgerVat(rows);
+  const kindFilter = filters.type ? CASH_BOOK_KIND_FILTERS[filters.type] : null;
+  const showVat = !kindFilter;
 
   return (
-    <Document title="Livre de caisse — Meri Beauty" author="Meri Beauty" subject="Journal chronologique de caisse">
+    <Document title={`Livre de caisse${kindFilter ? ` (${kindFilter.label})` : ""} — Meri Beauty`} author="Meri Beauty" subject="Journal chronologique de caisse">
       <Page size="A4" orientation="landscape" style={styles.page}>
-        <Letterhead filters={filters} generatedAt={generatedAt} />
+        <Letterhead filters={filters} kindFilter={kindFilter} generatedAt={generatedAt} />
         <Footer generatedAt={generatedAt} />
 
         <View style={styles.synthesis}>
           <View style={styles.synthesisItem}>
-            <Text style={styles.synthesisLabel}>Total des entrées</Text>
+            <Text style={styles.synthesisLabel}>{kindFilter ? "Total des apports" : "Total des entrées"}</Text>
             <Text style={styles.synthesisValue}>{money(totals.entrees)}</Text>
           </View>
           <View style={styles.synthesisItem}>
-            <Text style={styles.synthesisLabel}>Total des sorties</Text>
+            <Text style={styles.synthesisLabel}>{kindFilter ? "Total des dépenses" : "Total des sorties"}</Text>
             <Text style={styles.synthesisValue}>{money(totals.sorties)}</Text>
           </View>
           {/* No "Solde" card (17 Sep 2026): it repeated the running balance the
               journal's last line already prints, and read as a second total. */}
-          <View style={styles.synthesisItem}>
-            <Text style={styles.synthesisLabel}>Total HT</Text>
-            <Text style={styles.synthesisValue}>{money(vatTotals.ht)}</Text>
-          </View>
-          <View style={styles.synthesisItem}>
-            <Text style={styles.synthesisLabel}>Total TVA</Text>
-            <Text style={styles.synthesisValue}>{money(vatTotals.vat)}</Text>
-          </View>
+          {kindFilter ? (
+            <View style={styles.synthesisItem}>
+              <Text style={styles.synthesisLabel}>Net (apports - dépenses)</Text>
+              <Text style={styles.synthesisValue}>{money(totals.finalBalance)}</Text>
+            </View>
+          ) : (
+            <>
+              <View style={styles.synthesisItem}>
+                <Text style={styles.synthesisLabel}>Total HT</Text>
+                <Text style={styles.synthesisValue}>{money(vatTotals.ht)}</Text>
+              </View>
+              <View style={styles.synthesisItem}>
+                <Text style={styles.synthesisLabel}>Total TVA</Text>
+                <Text style={styles.synthesisValue}>{money(vatTotals.vat)}</Text>
+              </View>
+            </>
+          )}
           <View style={styles.synthesisItem}>
             <Text style={styles.synthesisLabel}>Écritures</Text>
             <Text style={styles.synthesisValue}>{rows.length}</Text>
           </View>
         </View>
 
-        <TableHead />
+        <TableHead showVat={showVat} />
         {dayGroups.length === 0 ? (
           <Text style={{ paddingVertical: 20, textAlign: "center", color: COLORS.muted }}>
             Aucun mouvement sur cette période.
           </Text>
         ) : (
-          dayGroups.map((group) => <DayBlock key={group.key} group={group} />)
+          dayGroups.map((group) => <DayBlock key={group.key} group={group} showVat={showVat} />)
         )}
       </Page>
     </Document>

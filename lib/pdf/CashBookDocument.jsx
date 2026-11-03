@@ -19,9 +19,9 @@ import { CASH_BOOK_KIND_FILTERS } from "@/lib/cash-book/filters";
  * explicit ask (14 Sep 2026) is that printing this book stays what it always
  * was to them: the days and their values, nothing else.
  *
- * Same document for the apports/dépenses filter (3 Nov 2026): the letterhead
- * names the filter, the synthèse reads apports/dépenses/net, and the Réf. +
- * TVA columns are dropped — a drawer movement carries neither.
+ * Same document for the apports/dépenses/transferts filter (3 Nov 2026): the
+ * letterhead names the filter, the synthèse uses that view's own labels, and
+ * the Réf. + TVA columns are dropped — a drawer movement carries neither.
  */
 const LOGO_BUFFER = fs.readFileSync(path.join(process.cwd(), "public", "Images", "Logo.png"));
 
@@ -47,6 +47,11 @@ function formatDateTime(date) {
     timeZone: "Europe/Brussels",
   });
   return `${formatDate(date)} à ${time}`;
+}
+
+/** Helvetica (a standard PDF font) has no "−" (U+2212) glyph — it prints as a gap. */
+function pdfText(value) {
+  return value.replaceAll("−", "-");
 }
 
 /** Same free-text cap as RecettesJournalDocument.jsx — see its own comment for why. */
@@ -288,18 +293,18 @@ export function CashBookDocument({ ledger, generatedAt }) {
 
         <View style={styles.synthesis}>
           <View style={styles.synthesisItem}>
-            <Text style={styles.synthesisLabel}>{kindFilter ? "Total des apports" : "Total des entrées"}</Text>
+            <Text style={styles.synthesisLabel}>{kindFilter ? pdfText(kindFilter.totals.entrees) : "Total des entrées"}</Text>
             <Text style={styles.synthesisValue}>{money(totals.entrees)}</Text>
           </View>
           <View style={styles.synthesisItem}>
-            <Text style={styles.synthesisLabel}>{kindFilter ? "Total des dépenses" : "Total des sorties"}</Text>
+            <Text style={styles.synthesisLabel}>{kindFilter ? pdfText(kindFilter.totals.sorties) : "Total des sorties"}</Text>
             <Text style={styles.synthesisValue}>{money(totals.sorties)}</Text>
           </View>
           {/* No "Solde" card (17 Sep 2026): it repeated the running balance the
               journal's last line already prints, and read as a second total. */}
           {kindFilter ? (
             <View style={styles.synthesisItem}>
-              <Text style={styles.synthesisLabel}>Net (apports - dépenses)</Text>
+              <Text style={styles.synthesisLabel}>{pdfText(kindFilter.totals.net)}</Text>
               <Text style={styles.synthesisValue}>{money(totals.finalBalance)}</Text>
             </View>
           ) : (

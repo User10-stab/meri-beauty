@@ -116,9 +116,9 @@ function downloadCaisseCsv({ ledger, report }) {
     ["Exporté le", new Date().toLocaleString("fr-BE")],
     [],
     ["Synthèse", "Montant (€)"],
-    [kindFilter ? "Total apports" : "Total entrées", totals.entrees],
-    [kindFilter ? "Total dépenses" : "Total sorties", totals.sorties],
-    [kindFilter ? "Net (apports − dépenses)" : "Solde", totals.finalBalance],
+    [kindFilter ? kindFilter.totals.entrees : "Total entrées", totals.entrees],
+    [kindFilter ? kindFilter.totals.sorties : "Total sorties", totals.sorties],
+    [kindFilter ? kindFilter.totals.net : "Solde", totals.finalBalance],
     ["Nombre d'écritures", rows.length],
   ];
 
@@ -431,17 +431,17 @@ export function CaisseClient({
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 print:grid-cols-3 print:gap-2">
             <StatCard
               icon={<ArrowUpCircle size={20} />}
-              label={kindFilter ? "Total apports" : "Total entrées"}
+              label={kindFilter ? kindFilter.totals.entrees : "Total entrées"}
               value={formatEuro(ledger.totals.entrees)}
             />
             <StatCard
               icon={<ArrowDownCircle size={20} />}
-              label={kindFilter ? "Total dépenses" : "Total sorties"}
+              label={kindFilter ? kindFilter.totals.sorties : "Total sorties"}
               value={formatEuro(ledger.totals.sorties)}
             />
             <StatCard
               icon={<Wallet size={20} />}
-              label={kindFilter ? "Net (apports − dépenses)" : "Solde"}
+              label={kindFilter ? kindFilter.totals.net : "Solde"}
               value={formatEuro(ledger.totals.finalBalance)}
             />
           </div>

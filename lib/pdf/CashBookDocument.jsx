@@ -3,7 +3,7 @@ import path from "node:path";
 import { Document, Page, View, Text, Image, StyleSheet } from "@react-pdf/renderer";
 import { COLORS, money, formatDate } from "./theme";
 import { groupLedgerRowsByDay, formatDayLabel, sumLedgerVat } from "@/lib/cash-book/day-groups";
-import { CASH_BOOK_KIND_FILTERS } from "@/lib/cash-book/filters";
+import { CASH_BOOK_KIND_FILTERS, displaySortie, displaySortiesTotal } from "@/lib/cash-book/filters";
 
 /**
  * The printable Livre de caisse — a real generated PDF (logo, real
@@ -36,8 +36,6 @@ const ROW_COLORS = {
   WITHDRAWAL: COLORS.credit,
   REFUND: COLORS.credit,
 };
-
-const NEGATIVE_DISPLAY_KINDS = new Set(["EXPENSE", "WITHDRAWAL"]);
 
 /** "17 septembre 2026 à 14:32" — the client wants the generation time, not just the day. */
 function formatDateTime(date) {
@@ -218,7 +216,7 @@ function TableHead({ showVat }) {
 
 function DataRow({ row, showVat }) {
   const color = ROW_COLORS[row.kind];
-  const sortieValue = row.sortie ? (NEGATIVE_DISPLAY_KINDS.has(row.kind) ? -row.sortie : row.sortie) : null;
+  const sortieValue = displaySortie(row);
   return (
     <View style={styles.dataRow} wrap={false}>
       <Text style={styles.colDate}>
@@ -244,7 +242,7 @@ function DataRow({ row, showVat }) {
   );
 }
 
-function DayBlock({ group, showVat }) {
+function DayBlock({ group, kindFilter, showVat }) {
   return (
     <View>
       {/* Day header carries only the label — the totals used to be repeated
@@ -267,7 +265,7 @@ function DayBlock({ group, showVat }) {
         {showVat && <Text style={[styles.colHt, styles.bold]}>{money(group.totalHt)}</Text>}
         {showVat && <Text style={[styles.colVat, styles.bold]}>{money(group.totalVat)}</Text>}
         <Text style={[styles.colEntree, styles.bold]}>{money(group.totalEntrees)}</Text>
-        <Text style={[styles.colSortie, styles.bold]}>{money(group.totalSorties)}</Text>
+        <Text style={[styles.colSortie, styles.bold]}>{money(displaySortiesTotal(group.totalSorties, kindFilter))}</Text>
         <Text style={[styles.colSolde, styles.bold]}>{money(group.closingBalance)}</Text>
       </View>
     </View>
@@ -292,21 +290,27 @@ export function CashBookDocument({ ledger, generatedAt }) {
         <Footer generatedAt={generatedAt} />
 
         <View style={styles.synthesis}>
-          <View style={styles.synthesisItem}>
-            <Text style={styles.synthesisLabel}>{kindFilter ? pdfText(kindFilter.totals.entrees) : "Total des entrées"}</Text>
-            <Text style={styles.synthesisValue}>{money(totals.entrees)}</Text>
-          </View>
-          <View style={styles.synthesisItem}>
-            <Text style={styles.synthesisLabel}>{kindFilter ? pdfText(kindFilter.totals.sorties) : "Total des sorties"}</Text>
-            <Text style={styles.synthesisValue}>{money(totals.sorties)}</Text>
-          </View>
+          {(!kindFilter || kindFilter.totals.entrees) && (
+            <View style={styles.synthesisItem}>
+              <Text style={styles.synthesisLabel}>{kindFilter ? pdfText(kindFilter.totals.entrees) : "Total des entrées"}</Text>
+              <Text style={styles.synthesisValue}>{money(totals.entrees)}</Text>
+            </View>
+          )}
+          {(!kindFilter || kindFilter.totals.sorties) && (
+            <View style={styles.synthesisItem}>
+              <Text style={styles.synthesisLabel}>{kindFilter ? pdfText(kindFilter.totals.sorties) : "Total des sorties"}</Text>
+              <Text style={styles.synthesisValue}>{money(displaySortiesTotal(totals.sorties, kindFilter))}</Text>
+            </View>
+          )}
           {/* No "Solde" card (17 Sep 2026): it repeated the running balance the
               journal's last line already prints, and read as a second total. */}
           {kindFilter ? (
-            <View style={styles.synthesisItem}>
-              <Text style={styles.synthesisLabel}>{pdfText(kindFilter.totals.net)}</Text>
-              <Text style={styles.synthesisValue}>{money(totals.finalBalance)}</Text>
-            </View>
+            kindFilter.totals.net && (
+              <View style={styles.synthesisItem}>
+                <Text style={styles.synthesisLabel}>{pdfText(kindFilter.totals.net)}</Text>
+                <Text style={styles.synthesisValue}>{money(totals.finalBalance)}</Text>
+              </View>
+            )
           ) : (
             <>
               <View style={styles.synthesisItem}>
@@ -331,7 +335,7 @@ export function CashBookDocument({ ledger, generatedAt }) {
             Aucun mouvement sur cette période.
           </Text>
         ) : (
-          dayGroups.map((group) => <DayBlock key={group.key} group={group} showVat={showVat} />)
+          dayGroups.map((group) => <DayBlock key={group.key} group={group} kindFilter={kindFilter} showVat={showVat} />)
         )}
       </Page>
     </Document>

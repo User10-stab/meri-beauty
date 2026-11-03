@@ -40,6 +40,7 @@ describe("Livre de caisse — apports/dépenses filter", () => {
   it("shows transferts de banque on their own, never inside apports & dépenses", () => {
     const transfers = applyCashBookKindFilter(ledger, "WITHDRAWAL");
     expect(transfers.rows.map((r) => r.kind)).toEqual(["WITHDRAWAL"]);
+    expect(transfers.rows.map((r) => r.solde)).toEqual([-100]);
     expect(transfers.totals).toEqual({ entrees: 0, sorties: 100, finalBalance: -100 });
     expect(applyCashBookKindFilter(ledger, "MOVEMENTS").rows.some((r) => r.kind === "WITHDRAWAL")).toBe(false);
   });

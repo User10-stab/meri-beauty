@@ -23,10 +23,22 @@ import { recordCashMovement } from "@/actions/dashboard/cash-movements";
 import { CaisseFilterBar } from "@/components/dashboard/boutique/caisse/CaisseFilterBar";
 import { groupLedgerRowsByDay, formatDayLabel } from "@/lib/cash-book/day-groups";
 import { CASH_MOVEMENT_TYPE_LABELS } from "@/lib/cash-book/movement-types";
-import { CASH_BOOK_KIND_FILTERS, cashBookFileBaseName } from "@/lib/cash-book/filters";
+import { CASH_BOOK_KIND_FILTERS, cashBookFileBaseName, displaySortie, displaySortiesTotal } from "@/lib/cash-book/filters";
 
 function formatEuro(value) {
   return new Intl.NumberFormat("fr-BE", { style: "currency", currency: "EUR" }).format(value);
+}
+
+/** "03/11/2026 10:11" — a date Excel recognises and sorts, unlike "3 nov. 2026 à 10:11". */
+function csvDateTime(iso) {
+  return new Date(iso).toLocaleString("fr-BE", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Europe/Brussels",
+  });
 }
 
 function formatDateTime(iso) {
@@ -34,8 +46,11 @@ function formatDateTime(iso) {
   return new Date(iso).toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short", timeZone: "Europe/Brussels" });
 }
 
+// The CSV is ";"-separated for a Belgian/French Excel, which reads "1349.94"
+// as text (or "12.5" as 12 May) — amounts must carry a decimal comma to stay
+// numbers the accountant can sum.
 function escapeCsv(value) {
-  const text = String(value ?? "");
+  const text = typeof value === "number" ? String(value).replace(".", ",") : String(value ?? "");
   return /[;"\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
 
@@ -68,10 +83,6 @@ const ROW_TEXT_TINTS = {
   WITHDRAWAL: "text-red-700 dark:text-red-400",
 };
 
-// Dépense/Transfert de banque render their Sorties amount as a negative
-// number (e.g. -220,00 €) instead of a plain positive figure, per Marie's
-// request — Apport/ventes keep their ordinary positive formatting.
-const NEGATIVE_DISPLAY_KINDS = new Set(["EXPENSE", "WITHDRAWAL"]);
 
 const MOVEMENT_TYPES = [
   { value: "EXPENSE", label: CASH_MOVEMENT_TYPE_LABELS.EXPENSE, hint: "Argent sorti du tiroir pour un achat (emballages, transport, fournisseur...)" },
@@ -113,12 +124,20 @@ function downloadCaisseCsv({ ledger, report }) {
     ["Livre de caisse — Meri Beauty"],
     ["Période", `du ${filters.from} au ${filters.to}`],
     ...(kindFilter ? [["Filtre", kindFilter.label]] : []),
-    ["Exporté le", new Date().toLocaleString("fr-BE")],
+    ["Exporté le", csvDateTime(new Date())],
     [],
     ["Synthèse", "Montant (€)"],
-    [kindFilter ? kindFilter.totals.entrees : "Total entrées", totals.entrees],
-    [kindFilter ? kindFilter.totals.sorties : "Total sorties", totals.sorties],
-    [kindFilter ? kindFilter.totals.net : "Solde", totals.finalBalance],
+    ...(kindFilter
+      ? [
+          [kindFilter.totals.entrees, totals.entrees],
+          [kindFilter.totals.sorties, totals.sorties],
+          [kindFilter.totals.net, totals.finalBalance],
+        ].filter(([label]) => label)
+      : [
+          ["Total entrées", totals.entrees],
+          ["Total sorties", totals.sorties],
+          ["Solde", totals.finalBalance],
+        ]),
     ["Nombre d'écritures", rows.length],
   ];
 
@@ -145,8 +164,8 @@ function downloadCaisseCsv({ ledger, report }) {
         ["Sessions de caisse", "Ouverture", "Clôture", "Fond initial (€)", "Compté (€)", "Écart (€)", "Type"],
         ...report.sessions.map((s) => [
           "",
-          formatDateTime(s.openedAt),
-          s.closedAt ? formatDateTime(s.closedAt) : "En cours",
+          csvDateTime(s.openedAt),
+          s.closedAt ? csvDateTime(s.closedAt) : "En cours",
           s.openingFloat,
           s.countedCash ?? "",
           s.variance ?? "",
@@ -160,12 +179,16 @@ function downloadCaisseCsv({ ledger, report }) {
     [],
     ["Date", "N° pièce", "Référence", "Désignation", "Entrées (€)", "Sorties (€)", kindFilter ? "Cumul (€)" : "Solde (€)"],
     ...rows.map((row) => [
-      formatDateTime(row.date),
+      csvDateTime(row.date),
       row.pieceNumber ?? "",
       row.reference ?? "",
       row.label,
       row.entree || "",
-      row.sortie ? (NEGATIVE_DISPLAY_KINDS.has(row.kind) ? -row.sortie : row.sortie) : "",
+      // Positive in the accountant's file (3 Nov 2026): Entrées/Sorties as two
+      // unsigned columns, so SUM(Sorties) = Total des sorties and
+      // Solde = solde précédent + entrée − sortie. Screen and PDF keep the
+      // negative display Marie asked for.
+      row.sortie || "",
       row.solde,
     ])
   );
@@ -429,21 +452,27 @@ export function CaisseClient({
       ) : (
         <>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 print:grid-cols-3 print:gap-2">
-            <StatCard
-              icon={<ArrowUpCircle size={20} />}
-              label={kindFilter ? kindFilter.totals.entrees : "Total entrées"}
-              value={formatEuro(ledger.totals.entrees)}
-            />
-            <StatCard
-              icon={<ArrowDownCircle size={20} />}
-              label={kindFilter ? kindFilter.totals.sorties : "Total sorties"}
-              value={formatEuro(ledger.totals.sorties)}
-            />
-            <StatCard
-              icon={<Wallet size={20} />}
-              label={kindFilter ? kindFilter.totals.net : "Solde"}
-              value={formatEuro(ledger.totals.finalBalance)}
-            />
+            {(!kindFilter || kindFilter.totals.entrees) && (
+              <StatCard
+                icon={<ArrowUpCircle size={20} />}
+                label={kindFilter ? kindFilter.totals.entrees : "Total entrées"}
+                value={formatEuro(ledger.totals.entrees)}
+              />
+            )}
+            {(!kindFilter || kindFilter.totals.sorties) && (
+              <StatCard
+                icon={<ArrowDownCircle size={20} />}
+                label={kindFilter ? kindFilter.totals.sorties : "Total sorties"}
+                value={formatEuro(displaySortiesTotal(ledger.totals.sorties, kindFilter))}
+              />
+            )}
+            {(!kindFilter || kindFilter.totals.net) && (
+              <StatCard
+                icon={<Wallet size={20} />}
+                label={kindFilter ? kindFilter.totals.net : "Solde"}
+                value={formatEuro(ledger.totals.finalBalance)}
+              />
+            )}
           </div>
 
           <div className="rounded-[10px] border border-stroke bg-white shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card print:border-0 print:shadow-none">
@@ -474,6 +503,7 @@ export function CaisseClient({
                 </TableHeader>
                 {dayGroups.map((group) => (
                   <DayGroup
+                    kindFilter={kindFilter}
                     key={group.key}
                     group={group}
                     isOpen={expandedDays.has(group.key)}
@@ -600,7 +630,7 @@ function SummaryRow({ label, value, emphasis = false, count }) {
   );
 }
 
-function DayGroup({ group, isOpen, onToggle }) {
+function DayGroup({ group, kindFilter, isOpen, onToggle }) {
   return (
     <TableBody className="print:break-inside-avoid">
       <TableRow
@@ -617,7 +647,7 @@ function DayGroup({ group, isOpen, onToggle }) {
           </span>
         </TableCell>
         <TableCell className="text-right tabular-nums">{formatEuro(group.totalEntrees)}</TableCell>
-        <TableCell className="text-right tabular-nums">{formatEuro(group.totalSorties)}</TableCell>
+        <TableCell className="text-right tabular-nums">{formatEuro(displaySortiesTotal(group.totalSorties, kindFilter))}</TableCell>
         <TableCell className="text-right tabular-nums">{formatEuro(group.closingBalance)}</TableCell>
       </TableRow>
       {isOpen &&
@@ -625,9 +655,8 @@ function DayGroup({ group, isOpen, onToggle }) {
           const href = pieceNumberHref(row);
           const rowKey = `${row.kind}-${row.pieceNumber ?? index}-${row.date}`;
           const textTint = ROW_TEXT_TINTS[row.kind] ?? ROW_STYLES[row.kind] ?? "";
-          const sortieDisplay = row.sortie
-            ? formatEuro(NEGATIVE_DISPLAY_KINDS.has(row.kind) ? -row.sortie : row.sortie)
-            : "—";
+          const sortie = displaySortie(row);
+          const sortieDisplay = sortie != null ? formatEuro(sortie) : "—";
           return (
             <TableRow key={rowKey} className={ROW_TINTS[row.kind] ?? ""}>
               <TableCell />
@@ -656,7 +685,7 @@ function DayGroup({ group, isOpen, onToggle }) {
           <TableCell />
           <TableCell colSpan={4}>Total du jour</TableCell>
           <TableCell className="text-right tabular-nums">{formatEuro(group.totalEntrees)}</TableCell>
-          <TableCell className="text-right tabular-nums">{formatEuro(group.totalSorties)}</TableCell>
+          <TableCell className="text-right tabular-nums">{formatEuro(displaySortiesTotal(group.totalSorties, kindFilter))}</TableCell>
           <TableCell className="text-right tabular-nums">{formatEuro(group.closingBalance)}</TableCell>
         </TableRow>
       )}

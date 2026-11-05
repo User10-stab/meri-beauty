@@ -1,5 +1,6 @@
 import { Document, Page, View, Text } from "@react-pdf/renderer";
 import { COLORS, money } from "./theme";
+import { formatClientCount } from "@/lib/gestion/top-clients";
 import { Letterhead, Footer, Kpis, SectionTitle, ReportTable, reportStyles, formatDayOnly, truncate } from "./report-kit";
 
 /**
@@ -168,17 +169,19 @@ export function GestionDocument({ report }) {
                 { key: "rank", label: "Rang", align: "right", flex: 0.4 },
                 { key: "name", label: "Client", flex: 1.8 },
                 { key: "email", label: "Email", flex: 2.2 },
+                { key: "count", label: "Nombre de fois", align: "right", flex: 1.1 },
                 { key: "amount", label: "Payé TTC", align: "right" },
               ]}
               rows={topClients.flatMap((group) =>
                 group.clients.length === 0
-                  ? [{ _key: group.category, category: group.label, rank: "", name: "Aucun client identifié", email: "", amount: "" }]
+                  ? [{ _key: group.category, category: group.label, rank: "", name: "Aucun client identifié", email: "", count: "", amount: "" }]
                   : group.clients.map((client, index) => ({
                       _key: `${group.category}-${client.key}`,
                       category: index === 0 ? group.label : "",
                       rank: String(index + 1),
                       name: truncate(client.name, 40),
                       email: truncate(client.email ?? "", 50),
+                      count: formatClientCount(group.category, client.count),
                       amount: money(client.amountTtc),
                     }))
               )}

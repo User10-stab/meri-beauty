@@ -22,11 +22,13 @@ import {
   FileSpreadsheet,
   Printer,
   Trophy,
+  Info,
 } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useConfirm } from "@/components/ConfirmProvider";
 import { deleteSalonExpense, setVariantCostPrice } from "@/actions/dashboard/gestion";
 import { SalonExpenseModal } from "@/components/dashboard/gestion/SalonExpenseModal";
+import { formatClientCount } from "@/lib/gestion/top-clients";
 
 function formatEuro(value) {
   // `+ 0` turns a negated zero (−0, from "−charges" when there are none) into 0.
@@ -89,9 +91,9 @@ function downloadGestionCsv(data) {
     ["Par catégorie", "Écritures", "CA HT (€)", "Coût produits (€)", "Marge brute (€)", "Taux (%)"],
     ...categories.map((c) => [c.label, c.count, c.revenueHt, c.costHt, c.marginHt, c.marginRate ?? ""]),
     [],
-    ["Meilleurs clients", "Catégorie", "Rang", "Email", "Payé TTC (€)"],
+    ["Meilleurs clients", "Catégorie", "Rang", "Email", "Nombre de fois", "Payé TTC (€)"],
     ...(data.topClients ?? []).flatMap((g) =>
-      g.clients.map((c, i) => [c.name, g.label, i + 1, c.email ?? "", c.amountTtc])
+      g.clients.map((c, i) => [c.name, g.label, i + 1, c.email ?? "", c.count, c.amountTtc])
     ),
     [],
     ["Par mois", "CA TTC (€)", "TVA (€)", "CA HT (€)", "Coût produits (€)", "Marge brute (€)", "Charges HT (€)", "Dépenses caisse (€)", "Bénéfice net (€)"],
@@ -624,6 +626,8 @@ function MissingCostRow({ product, onSaved }) {
 
 /** Top clients per category, by what they paid over the period — for targeted promos. */
 function TopClients({ groups }) {
+  // One detail open at a time, keyed "CATEGORY:clientKey".
+  const [openKey, setOpenKey] = useState(null);
   if (!groups.length) return null;
   return (
     <div className="min-w-0 border-t border-stroke pt-6 dark:border-dark-3 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0 print:border-l print:border-t-0 print:pl-4 print:pt-0">
@@ -631,7 +635,7 @@ function TopClients({ groups }) {
         <Trophy className="h-4 w-4 print:hidden" strokeWidth={2} />
         Meilleurs clients par catégorie
       </p>
-      <p className="mt-1 text-xs text-gray-400">Top 5 sur la période, montant payé TTC (remboursements déduits).</p>
+      <p className="mt-1 text-xs text-gray-400">Top 5 sur la période : montant payé TTC (remboursements déduits) et nombre de fois. Cliquez sur ⓘ pour le détail.</p>
 
       <div className="mt-4 grid grid-cols-1 gap-x-6 gap-y-5 sm:grid-cols-2 print:grid-cols-3 print:gap-y-2">
         {groups.map((group) => (
@@ -641,22 +645,66 @@ function TopClients({ groups }) {
               <p className="text-xs text-gray-400">Aucun client identifié.</p>
             ) : (
               <ol className="space-y-1 text-sm">
-                {group.clients.map((client, index) => (
-                  <li key={client.key} className="flex items-baseline gap-2">
-                    <span className="w-4 shrink-0 text-xs font-semibold tabular-nums text-gray-400">{index + 1}.</span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-gray-700 dark:text-dark-6" title={client.email ?? undefined}>
-                        {client.name}
-                      </span>
-                      {client.email && client.email !== client.name && (
-                        <span className="block truncate text-xs text-gray-400">{client.email}</span>
+                {group.clients.map((client, index) => {
+                  const detailKey = `${group.category}:${client.key}`;
+                  const isOpen = openKey === detailKey;
+                  return (
+                    <li key={client.key}>
+                      <div className="flex items-baseline gap-2">
+                        <span className="w-4 shrink-0 text-xs font-semibold tabular-nums text-gray-400">{index + 1}.</span>
+                        <span className="min-w-0 flex-1">
+                          <span className="flex items-center gap-1">
+                            <span className="truncate text-gray-700 dark:text-dark-6" title={client.email ?? undefined}>
+                              {client.name}
+                            </span>
+                            {client.visits?.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setOpenKey(isOpen ? null : detailKey)}
+                                aria-expanded={isOpen}
+                                aria-label={`Détail des ${formatClientCount(group.category, client.count)} de ${client.name}`}
+                                title="Voir le détail"
+                                className={`shrink-0 rounded-full p-0.5 transition-colors hover:text-primary print:hidden ${
+                                  isOpen ? "text-primary" : "text-gray-400"
+                                }`}
+                              >
+                                <Info className="h-3.5 w-3.5" strokeWidth={2} />
+                              </button>
+                            )}
+                          </span>
+                          {client.email && client.email !== client.name && (
+                            <span className="block truncate text-xs text-gray-400">{client.email}</span>
+                          )}
+                        </span>
+                        <span className="shrink-0 text-right">
+                          <span className="block font-semibold tabular-nums text-dark dark:text-white">
+                            {formatEuro(client.amountTtc)}
+                          </span>
+                          <span className="block text-xs tabular-nums text-gray-400">
+                            {formatClientCount(group.category, client.count)}
+                          </span>
+                        </span>
+                      </div>
+                      {isOpen && (
+                        <ul className="mb-1 ml-6 mt-1 divide-y divide-stroke rounded-md border border-stroke bg-gray-50 text-xs dark:divide-dark-3 dark:border-dark-3 dark:bg-dark-2 print:hidden">
+                          {client.visits.map((visit) => (
+                            <li key={visit.id} className="flex items-baseline gap-2 px-2.5 py-1.5">
+                              <span className="shrink-0 tabular-nums text-gray-500 dark:text-dark-6">
+                                {visit.paidAt ? formatDate(visit.paidAt) : "—"}
+                              </span>
+                              <span className="min-w-0 flex-1 truncate text-gray-700 dark:text-dark-6" title={visit.label ?? undefined}>
+                                {visit.label ?? "—"}
+                              </span>
+                              <span className="shrink-0 font-semibold tabular-nums text-dark dark:text-white">
+                                {formatEuro(visit.amountTtc)}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
                       )}
-                    </span>
-                    <span className="shrink-0 font-semibold tabular-nums text-dark dark:text-white">
-                      {formatEuro(client.amountTtc)}
-                    </span>
-                  </li>
-                ))}
+                    </li>
+                  );
+                })}
               </ol>
             )}
           </div>

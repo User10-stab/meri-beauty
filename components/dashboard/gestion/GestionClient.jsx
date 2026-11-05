@@ -142,14 +142,21 @@ function signTint(value) {
 export function GestionClient({ data }) {
   const router = useRouter();
   const confirm = useConfirm();
-  const [, startRefresh] = useTransition();
+  const [isRefreshing, startRefresh] = useTransition();
   const [modal, setModal] = useState({ open: false, expense: null });
   const [showCashExpenses, setShowCashExpenses] = useState(false);
 
   const { filters, summary, categories, months, expenses, cashExpenses, truncated, topClients } = data;
   const isWholeSalon = filters.category === "ALL";
   // Excel / PDF are re-built server-side for exactly the period and category on screen.
-  const exportQuery = new URLSearchParams({ from: filters.from, to: filters.to, category: filters.category }).toString();
+  const topBy = filters.topBy === "count" ? "count" : "amount";
+  const exportQuery = new URLSearchParams({ from: filters.from, to: filters.to, category: filters.category, topBy }).toString();
+
+  function changeTopBy(next) {
+    if (next === topBy) return;
+    const params = new URLSearchParams({ from: filters.from, to: filters.to, category: filters.category, topBy: next });
+    startRefresh(() => router.push(`/dashboard/gestion?${params.toString()}`, { scroll: false }));
+  }
   const headline = isWholeSalon ? summary.netProfitHt : summary.grossMarginHt;
 
   async function handleDelete(expense) {
@@ -268,7 +275,7 @@ export function GestionClient({ data }) {
         </dl>
         </div>
 
-        <TopClients groups={topClients ?? []} />
+        <TopClients groups={topClients ?? []} topBy={topBy} onTopByChange={changeTopBy} pending={isRefreshing} />
       </div>
 
       {/* ── Summary cards ─────────────────────────────────────────────────── */}
@@ -625,17 +632,53 @@ function MissingCostRow({ product, onSaved }) {
 }
 
 /** Top clients per category, by what they paid over the period — for targeted promos. */
-function TopClients({ groups }) {
+const TOP_BY_OPTIONS = [
+  { value: "amount", label: "Montant" },
+  { value: "count", label: "Nombre de fois" },
+];
+
+function TopClients({ groups, topBy, onTopByChange, pending }) {
   // One detail open at a time, keyed "CATEGORY:clientKey".
   const [openKey, setOpenKey] = useState(null);
   if (!groups.length) return null;
   return (
     <div className="min-w-0 border-t border-stroke pt-6 dark:border-dark-3 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0 print:border-l print:border-t-0 print:pl-4 print:pt-0">
-      <p className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-dark-6">
-        <Trophy className="h-4 w-4 print:hidden" strokeWidth={2} />
-        Meilleurs clients par catégorie
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-dark-6">
+          <Trophy className="h-4 w-4 print:hidden" strokeWidth={2} />
+          Meilleurs clients par catégorie
+        </p>
+        <div
+          role="radiogroup"
+          aria-label="Classer les meilleurs clients par"
+          className={`inline-flex rounded-[7px] border border-stroke p-0.5 text-xs font-semibold dark:border-dark-3 print:hidden ${
+            pending ? "opacity-60" : ""
+          }`}
+        >
+          {TOP_BY_OPTIONS.map((option) => {
+            const active = topBy === option.value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                disabled={pending}
+                onClick={() => onTopByChange(option.value)}
+                className={`rounded-[5px] px-2.5 py-1 transition-colors ${
+                  active ? "bg-[#2f3a2e] text-white" : "text-gray-600 hover:text-primary dark:text-dark-6"
+                }`}
+              >
+                {option.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <p className="mt-1 text-xs text-gray-400">
+        Top 5 sur la période, classé par {topBy === "count" ? "nombre de fois" : "montant payé TTC"} (remboursements
+        déduits). Cliquez sur ⓘ pour le détail.
       </p>
-      <p className="mt-1 text-xs text-gray-400">Top 5 sur la période : montant payé TTC (remboursements déduits) et nombre de fois. Cliquez sur ⓘ pour le détail.</p>
 
       <div className="mt-4 grid grid-cols-1 gap-x-6 gap-y-5 sm:grid-cols-2 print:grid-cols-3 print:gap-y-2">
         {groups.map((group) => (

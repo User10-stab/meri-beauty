@@ -17,6 +17,7 @@ export async function GET(request) {
     from: searchParams.get("from") || undefined,
     to: searchParams.get("to") || undefined,
     category: searchParams.get("category") || undefined,
+    topBy: searchParams.get("topBy") || undefined,
   });
 
   if (!result.success) {

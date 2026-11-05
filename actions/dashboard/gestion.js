@@ -27,7 +27,7 @@ async function requireGestionAccess() {
   return { session };
 }
 
-/** @param {{ from?: string, to?: string, category?: string }} [params] */
+/** @param {{ from?: string, to?: string, category?: string, topBy?: string }} [params] */
 export async function getGestionReport(params = {}) {
   const guard = await requireGestionAccess();
   if (guard.error) return { success: false, message: guard.error };

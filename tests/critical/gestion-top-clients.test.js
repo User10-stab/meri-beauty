@@ -84,6 +84,19 @@ describe("buildTopClients", () => {
     expect(events.map((c) => c.name)).toEqual(["F", "E", "D", "C", "B"]);
   });
 
+  it("can rank by number of visits instead of amount", () => {
+    const rows = [
+      { ...row("APPOINTMENT", 300, "Big", "big@x.be"), paymentId: "b1" },
+      { ...row("APPOINTMENT", 40, "Often", "often@x.be"), paymentId: "o1" },
+      { ...row("APPOINTMENT", 40, "Often", "often@x.be"), paymentId: "o2" },
+      { ...row("APPOINTMENT", 40, "Often", "often@x.be"), paymentId: "o3" },
+    ];
+    const byAmount = buildTopClients(rows, "APPOINTMENT")[0].clients.map((c) => c.name);
+    const byCount = buildTopClients(rows, "APPOINTMENT", { sortBy: "count" })[0].clients.map((c) => c.name);
+    expect(byAmount).toEqual(["Big", "Often"]);
+    expect(byCount).toEqual(["Often", "Big"]);
+  });
+
   it("returns only the filtered category", () => {
     expect(
       buildTopClients([row("ORDER", 10, "A")], "WORKSHOP").map(

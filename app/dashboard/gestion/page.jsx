@@ -19,6 +19,7 @@ export default async function GestionPage({ searchParams }) {
     from: typeof params?.from === "string" ? params.from : undefined,
     to: typeof params?.to === "string" ? params.to : undefined,
     category: typeof params?.category === "string" ? params.category : undefined,
+    topBy: typeof params?.topBy === "string" ? params.topBy : undefined,
   });
 
   return (

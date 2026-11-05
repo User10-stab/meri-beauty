@@ -161,7 +161,9 @@ export function GestionDocument({ report }) {
 
         {topClients.length > 0 && (
           <>
-            <SectionTitle>Meilleurs clients par catégorie (payé TTC)</SectionTitle>
+            <SectionTitle>
+              Meilleurs clients par catégorie (classés par {filters.topBy === "count" ? "nombre de fois" : "montant payé TTC"})
+            </SectionTitle>
             <ReportTable
               emptyLabel="Aucun client identifié sur cette période."
               columns={[

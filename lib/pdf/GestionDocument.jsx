@@ -31,7 +31,7 @@ function expensePeriod(expense) {
 
 /** @param {{ report: Awaited<ReturnType<typeof import("@/lib/gestion/build-gestion-report").buildGestionReport>> }} props */
 export function GestionDocument({ report }) {
-  const { filters, summary, categories, months, expenses, cashExpenses, truncated, generatedAt } = report;
+  const { filters, summary, categories, months, expenses, cashExpenses, truncated, generatedAt, topClients = [] } = report;
   const isWholeSalon = filters.category === "ALL";
 
   const kpis = [
@@ -157,6 +157,34 @@ export function GestionDocument({ report }) {
             rate: rate(summary.grossMarginRate),
           }}
         />
+
+        {topClients.length > 0 && (
+          <>
+            <SectionTitle>Meilleurs clients par catégorie (payé TTC)</SectionTitle>
+            <ReportTable
+              emptyLabel="Aucun client identifié sur cette période."
+              columns={[
+                { key: "category", label: "Catégorie", flex: 1.1 },
+                { key: "rank", label: "Rang", align: "right", flex: 0.4 },
+                { key: "name", label: "Client", flex: 1.8 },
+                { key: "email", label: "Email", flex: 2.2 },
+                { key: "amount", label: "Payé TTC", align: "right" },
+              ]}
+              rows={topClients.flatMap((group) =>
+                group.clients.length === 0
+                  ? [{ _key: group.category, category: group.label, rank: "", name: "Aucun client identifié", email: "", amount: "" }]
+                  : group.clients.map((client, index) => ({
+                      _key: `${group.category}-${client.key}`,
+                      category: index === 0 ? group.label : "",
+                      rank: String(index + 1),
+                      name: truncate(client.name, 40),
+                      email: truncate(client.email ?? "", 50),
+                      amount: money(client.amountTtc),
+                    }))
+              )}
+            />
+          </>
+        )}
 
         <SectionTitle>Charges du salon</SectionTitle>
         <ReportTable

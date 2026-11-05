@@ -21,6 +21,7 @@ import {
   Landmark,
   FileSpreadsheet,
   Printer,
+  Trophy,
 } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useConfirm } from "@/components/ConfirmProvider";
@@ -88,6 +89,11 @@ function downloadGestionCsv(data) {
     ["Par catégorie", "Écritures", "CA HT (€)", "Coût produits (€)", "Marge brute (€)", "Taux (%)"],
     ...categories.map((c) => [c.label, c.count, c.revenueHt, c.costHt, c.marginHt, c.marginRate ?? ""]),
     [],
+    ["Meilleurs clients", "Catégorie", "Rang", "Email", "Payé TTC (€)"],
+    ...(data.topClients ?? []).flatMap((g) =>
+      g.clients.map((c, i) => [c.name, g.label, i + 1, c.email ?? "", c.amountTtc])
+    ),
+    [],
     ["Par mois", "CA TTC (€)", "TVA (€)", "CA HT (€)", "Coût produits (€)", "Marge brute (€)", "Charges HT (€)", "Dépenses caisse (€)", "Bénéfice net (€)"],
     ...months.map((m) => [
       formatMonthKey(m.month),
@@ -138,7 +144,7 @@ export function GestionClient({ data }) {
   const [modal, setModal] = useState({ open: false, expense: null });
   const [showCashExpenses, setShowCashExpenses] = useState(false);
 
-  const { filters, summary, categories, months, expenses, cashExpenses, truncated } = data;
+  const { filters, summary, categories, months, expenses, cashExpenses, truncated, topClients } = data;
   const isWholeSalon = filters.category === "ALL";
   // Excel / PDF are re-built server-side for exactly the period and category on screen.
   const exportQuery = new URLSearchParams({ from: filters.from, to: filters.to, category: filters.category }).toString();
@@ -222,7 +228,8 @@ export function GestionClient({ data }) {
       )}
 
       {/* ── Result ────────────────────────────────────────────────────────── */}
-      <div className="rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card print:shadow-none">
+      <div className="grid grid-cols-1 gap-8 rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card lg:grid-cols-[minmax(0,28rem)_minmax(0,1fr)] print:grid-cols-[minmax(0,22rem)_minmax(0,1fr)] print:gap-4 print:shadow-none">
+        <div className="min-w-0">
         <p className="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-dark-6">
           {isWholeSalon ? "Bénéfice net du salon (HT)" : `Marge brute — ${filters.categoryLabel} (HT)`}
         </p>
@@ -257,6 +264,9 @@ export function GestionClient({ data }) {
             </div>
           )}
         </dl>
+        </div>
+
+        <TopClients groups={topClients ?? []} />
       </div>
 
       {/* ── Summary cards ─────────────────────────────────────────────────── */}
@@ -609,6 +619,50 @@ function MissingCostRow({ product, onSaved }) {
         )}
       </form>
     </li>
+  );
+}
+
+/** Top clients per category, by what they paid over the period — for targeted promos. */
+function TopClients({ groups }) {
+  if (!groups.length) return null;
+  return (
+    <div className="min-w-0 border-t border-stroke pt-6 dark:border-dark-3 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0 print:border-l print:border-t-0 print:pl-4 print:pt-0">
+      <p className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-dark-6">
+        <Trophy className="h-4 w-4 print:hidden" strokeWidth={2} />
+        Meilleurs clients par catégorie
+      </p>
+      <p className="mt-1 text-xs text-gray-400">Top 5 sur la période, montant payé TTC (remboursements déduits).</p>
+
+      <div className="mt-4 grid grid-cols-1 gap-x-6 gap-y-5 sm:grid-cols-2 print:grid-cols-3 print:gap-y-2">
+        {groups.map((group) => (
+          <div key={group.category} className="min-w-0 break-inside-avoid">
+            <p className="mb-1.5 text-sm font-semibold text-dark dark:text-white">{group.label}</p>
+            {group.clients.length === 0 ? (
+              <p className="text-xs text-gray-400">Aucun client identifié.</p>
+            ) : (
+              <ol className="space-y-1 text-sm">
+                {group.clients.map((client, index) => (
+                  <li key={client.key} className="flex items-baseline gap-2">
+                    <span className="w-4 shrink-0 text-xs font-semibold tabular-nums text-gray-400">{index + 1}.</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-gray-700 dark:text-dark-6" title={client.email ?? undefined}>
+                        {client.name}
+                      </span>
+                      {client.email && client.email !== client.name && (
+                        <span className="block truncate text-xs text-gray-400">{client.email}</span>
+                      )}
+                    </span>
+                    <span className="shrink-0 font-semibold tabular-nums text-dark dark:text-white">
+                      {formatEuro(client.amountTtc)}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

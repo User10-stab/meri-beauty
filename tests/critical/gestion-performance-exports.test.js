@@ -109,7 +109,7 @@ const performanceReport = {
 describe("Gestion exports", () => {
   it("the Excel workbook carries TTC, TVA and HT per month and lists products missing a purchase price", async () => {
     const workbook = await readWorkbook(await buildGestionWorkbook(gestionReport));
-    expect(workbook.worksheets.map((s) => s.name)).toEqual(["Synthèse", "Par mois", "Par catégorie", "Charges du salon", "Dépenses de caisse"]);
+    expect(workbook.worksheets.map((s) => s.name)).toEqual(["Synthèse", "Par mois", "Par catégorie", "Meilleurs clients", "Charges du salon", "Dépenses de caisse"]);
 
     const september = findRow(workbook.getWorksheet("Par mois"), "Septembre 2026");
     expect([2, 3, 4].map((c) => september.getCell(c).value)).toEqual([10740.73, 996.29, 9744.44]);

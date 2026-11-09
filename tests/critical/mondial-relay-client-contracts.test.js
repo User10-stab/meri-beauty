@@ -1,5 +1,5 @@
 import { describe, expect, test, vi, beforeEach, afterEach } from "vitest";
-import { createShipmentLabel } from "../../lib/mondial-relay.js";
+import { createShipmentLabel, redactCredentials } from "../../lib/mondial-relay.js";
 
 const validArgs = {
   credentials: { login: "L", password: "P", customerId: "C" },
@@ -107,5 +107,40 @@ describe("createShipmentLabel", () => {
     const result = await createShipmentLabel(validArgs);
     expect(result.success).toBe(false);
     expect(result.uncertain).toBeFalsy();
+  });
+});
+
+describe("password echoed back by Mondial Relay", () => {
+  const ECHO = (inner) => `<ShipmentCreationResponse><Context><Login>L@x</Login><Password>s3cr$t;+!&amp;x</Password><CustomerId>C</CustomerId></Context>${inner}</ShipmentCreationResponse>`;
+
+  test("redactCredentials masks the password and nothing else", () => {
+    expect(redactCredentials(ECHO(""))).toBe(
+      "<ShipmentCreationResponse><Context><Login>L@x</Login><Password>***</Password><CustomerId>C</CustomerId></Context></ShipmentCreationResponse>"
+    );
+    expect(redactCredentials(null)).toBe(null);
+  });
+
+  test("success: rawResponse never contains the password, label still parsed", async () => {
+    const body = ECHO(`<ShipmentsList><Shipment ShipmentNumber="03452431"><Status Code="0" Level="Warning" Message="OK" /></Shipment></ShipmentsList><OutputData><Output>https://x/label.pdf</Output></OutputData>`);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(xmlResponse(body)));
+    const result = await createShipmentLabel(validArgs);
+    expect(result.success).toBe(true);
+    expect(result.shipmentNumber).toBe("03452431");
+    expect(result.labelUrl).toBe("https://x/label.pdf");
+    expect(result.rawResponse).not.toContain("s3cr");
+    expect(result.rawResponse).toContain("<Password>***</Password>");
+  });
+
+  test("rejection and HTTP error: rawResponse and logs never contain the password", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const rejected = ECHO(`<StatusList><Status Code="99999" Level="Error" Message="No price" /></StatusList>`);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(xmlResponse(rejected)));
+    const r1 = await createShipmentLabel(validArgs);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(xmlResponse(ECHO(""), { status: 500 })));
+    const r2 = await createShipmentLabel(validArgs);
+    expect(r1.message).toBe("No price");
+    for (const r of [r1, r2]) expect(r.rawResponse).not.toContain("s3cr");
+    expect(JSON.stringify(errSpy.mock.calls)).not.toContain("s3cr");
+    errSpy.mockRestore();
   });
 });

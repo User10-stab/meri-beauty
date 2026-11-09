@@ -21,6 +21,9 @@
  *   4. Relancer toutes les clientes de la liste :
  *        npm run relance:avis -- --envoyer tout
  *
+ * Aucune copie n'est envoyée à contact@meribeautystudio.com, sauf avec --copie.
+ * Un envoi raté s'affiche en ✗ et la cliente reste dans la liste.
+ *
  * Période : par défaut la semaine passée (lundi → dimanche, heure de
  * Bruxelles). Pour une autre : --du 2026-11-02 --au 2026-11-08 (inclus).
  *
@@ -54,6 +57,7 @@ function arg(name) {
 const testId = arg("--test");
 const testTo = arg("--a");
 const sendTarget = arg("--envoyer");
+const withCopy = args.includes("--copie");
 
 // Minuit à Bruxelles pour une date AAAA-MM-JJ, en instant UTC.
 function brusselsMidnight(ymd) {
@@ -160,6 +164,9 @@ function send(t, toAddress) {
     customerName: t.name,
     serviceName: t.service,
     to: toAddress,
+    // Pas de copie à contact@ : une relance groupée en déposerait une par
+    // cliente dans la boîte du salon. --copie pour la remettre.
+    skipCc: !withCopy,
   });
 }
 

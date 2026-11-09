@@ -79,7 +79,7 @@ export async function getReviewTargetFromToken(token) {
           serviceName: reservation.session?.workshop?.title || "Atelier",
           staffName: reservation.session?.animator?.name || null,
           customerName: reservation.customer?.fullName || "Client",
-          date: reservation.session?.startTime,
+          date: reservation.session?.startDate,
         },
       };
     }
@@ -110,7 +110,7 @@ export async function getReviewTargetFromToken(token) {
           serviceName: reservation.session?.formation?.title || "Formation",
           staffName: reservation.session?.animator?.name || null,
           customerName: reservation.customer?.fullName || "Client",
-          date: reservation.session?.startTime,
+          date: reservation.session?.startDate,
         },
       };
     }

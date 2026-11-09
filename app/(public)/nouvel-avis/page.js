@@ -11,7 +11,10 @@ export async function generateMetadata() {
   };
 }
 
-export default function NouvelAvisPage({ searchParams }) {
-  const token = searchParams?.token ?? null;
+// Next 16 : searchParams est une Promise — sans await, le jeton était
+// toujours perdu et la page affichait « Lien invalide ».
+export default async function NouvelAvisPage({ searchParams }) {
+  const params = await searchParams;
+  const token = typeof params?.token === "string" ? params.token : null;
   return <NouvelAvisPageClient token={token} />;
 }

@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev ",
     "backfill:tickets": "node --experimental-detect-module scripts/backfill-ticket-numbers.mjs",
+    "relance:avis": "node scripts/relance-avis.mjs",
     "audit:refund-states": "node --experimental-detect-module scripts/audit-refund-states.mjs",
     "dev:stripe": "node scripts/dev-with-stripe-webhooks.mjs",
     "postinstall": "prisma generate",
@@ -82,6 +83,7 @@
     "@types/react": "19.2.18",
     "eslint": "^9",
     "eslint-config-next": "16.3.0",
+    "jiti": "^2.7.0",
     "tailwindcss": "^4",
     "typescript": "5.8.2",
     "vitest": "4.1.10",

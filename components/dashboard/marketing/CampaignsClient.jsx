@@ -8,6 +8,7 @@ const STATUS_LABELS = {
   DRAFT: "Brouillon",
   SCHEDULED: "Planifiée",
   SENT: "Envoyée",
+  FAILED: "Terminée avec des envois à vérifier",
   CANCELLED: "Annulée",
 };
 
@@ -65,7 +66,7 @@ export function CampaignsClient() {
   const totals = campaigns.reduce(
     (acc, c) => ({
       count: acc.count + 1,
-      sent: acc.sent + (c.totalSenders || 0),
+      sent: acc.sent + (c.sentCount || (c.status === "SENT" ? c.totalSenders : 0) || 0),
       opened: acc.opened + (c.openedCount || 0),
       clicked: acc.clicked + (c.clickedCount || 0),
     }),
@@ -123,10 +124,15 @@ export function CampaignsClient() {
                       👁️ {c.openedCount}/{c.totalSenders} ouvertures ({c.openRate} %) · 👆 {c.clickedCount} clics ({c.clickRate} %)
                     </p>
                   )}
+                  {c.status === "FAILED" && (
+                    <p className="mt-1 text-xs font-medium text-red-600">
+                      {c.sentCount || 0}/{c.totalSenders} envoyés
+                    </p>
+                  )}
                   {c.status === "SCHEDULED" && (c.totalSenders || 0) > 0 && (
                     <p className="mt-1 text-xs font-medium text-amber-600 dark:text-amber-400">
                       ⏳ File d'attente : {c.sentCount || 0}/{c.totalSenders} envoyés
-                      {c.scheduledDate ? ` · reprise auto le ${new Date(c.scheduledDate).toLocaleDateString("fr-BE")}` : ""}
+                      {c.scheduledDate ? ` · reprise auto le ${new Date(c.scheduledDate).toLocaleString("fr-BE")}` : ""}
                     </p>
                   )}
                 </div>

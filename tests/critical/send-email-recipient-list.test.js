@@ -4,7 +4,11 @@ const sendMock = vi.fn();
 const createTransport = vi.fn(() => ({ sendMail: sendMock }));
 vi.mock("nodemailer", () => ({ default: { createTransport } }));
 vi.mock("@/lib/monitoring", () => ({ captureError: vi.fn() }));
-vi.mock("@/lib/campaigns/email-quota", () => ({ recordEmailSent: vi.fn(async () => {}) }));
+const reserveSmtpQuota = vi.fn();
+vi.mock("@/lib/campaigns/email-quota", () => ({
+  reserveSmtpQuota,
+  finishSmtpQuota: vi.fn(async () => {}),
+}));
 
 const { sendEmail } = await import("@/lib/email");
 
@@ -20,6 +24,7 @@ describe("sendEmail recipient guard", () => {
     vi.stubEnv("SMTP_PASSWORD", "test-password");
     vi.stubEnv("EMAIL_FROM", "");
     createTransport.mockClear();
+    reserveSmtpQuota.mockReset().mockResolvedValue({ id: "reservation" });
     sendMock.mockReset();
     sendMock.mockResolvedValue({ messageId: "msg_1", accepted: ["a@example.com"], rejected: [] });
   });
@@ -64,13 +69,31 @@ describe("sendEmail recipient guard", () => {
       rejected: ["a@example.com"],
     });
     const result = await sendEmail({ to: "a@example.com", subject: "s", forceCc: true });
-    expect(result).toEqual({ success: false, error: "SMTP accepted only the internal copy" });
+    expect(result).toMatchObject({ success: false, error: "SMTP accepted only the internal copy" });
   });
 
   it("does not attempt delivery without SMTP credentials", async () => {
     vi.stubEnv("SMTP_PASSWORD", "");
     expect(await sendEmail({ to: "a@example.com", subject: "s" })).toMatchObject({ success: false });
     expect(createTransport).not.toHaveBeenCalled();
+  });
+
+  it("defers before creating an SMTP transport when shared capacity is exhausted", async () => {
+    const retryAt = new Date("2026-11-10T12:00:00Z");
+    reserveSmtpQuota.mockResolvedValue({ retryAt });
+    expect(await sendEmail({ to: "a@example.com", subject: "s" })).toMatchObject({
+      success: false, kind: "quota", retryAt,
+    });
+    expect(createTransport).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{ responseCode: 451 }, "temporary"],
+    [{ responseCode: 550 }, "permanent"],
+    [{ code: "ETIMEDOUT", command: "CONN" }, "unknown"],
+  ])("classifies SMTP failure %j as %s", async (metadata, kind) => {
+    sendMock.mockRejectedValue(Object.assign(new Error("SMTP error"), metadata));
+    expect(await sendEmail({ to: "a@example.com", subject: "s" })).toMatchObject({ success: false, kind });
   });
 
   it.each([[null], [""], ["  "], [[]], [["", " "]]])("rejects %j", async (to) => {

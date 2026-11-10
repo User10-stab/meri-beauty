@@ -75,6 +75,7 @@ la version qui utilise SMTP :
 EMAIL_PROVIDER=smtp
 SMTP_HOST=smtp.mail.ovh.net
 SMTP_PORT=465
+EMAIL_HOURLY_LIMIT=180
 SMTP_USER=contact@meribeautystudio.com
 SMTP_PASSWORD="<mot de passe de la boîte OVH>"
 ```
@@ -84,9 +85,17 @@ et l'adresse d'expédition est celle de `SMTP_USER`. Si `EMAIL_FROM` est défini
 il doit correspondre à une adresse autorisée pour cette boîte.
 
 Remplacer toute ancienne valeur `EMAIL_PROVIDER=resend` et retirer
-`RESEND_API_KEY` après la bascule. `EMAIL_DAILY_LIMIT` règle le budget journalier
-utilisé par les campagnes et les demandes d'avis (100 par défaut). Après le
-déploiement, vérifier la réception avec un compte de test.
+`RESEND_API_KEY` après la bascule. `EMAIL_HOURLY_LIMIT` fixe le nombre
+de soumissions SMTP sur 60 minutes glissantes (180 par défaut), partagé
+entre les campagnes et les e-mails transactionnels. Les campagnes reprennent
+automatiquement lorsque la capacité revient. Les autres appels d’envoi
+reçoivent une erreur de quota et une date de reprise si la capacité est épuisée.
+
+Le planificateur intégré vérifie les campagnes au démarrage et toutes les
+cinq minutes. Avec `JOBS_RUNNER=external`, configurer le cron du VPS pour appeler
+`GET /api/cron` avec `Authorization: Bearer <CRON_SECRET>` toutes les cinq minutes
+(`*/5 * * * *`). Vérifier le mode et le dernier passage via `/api/health`.
+Appliquer la migration Prisma avant de démarrer la nouvelle version.
 
 ---
 

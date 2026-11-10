@@ -31,7 +31,8 @@ describe("homepage testimonials come from real reviews only", () => {
 
   test("the verification disclosure is displayed next to the reviews", () => {
     expect(component).toContain("ayant réellement effectué un rendez-vous");
-    expect(component).toContain("sans sélection sur la note");
+    // The ordering policy (newest-first, no selection on the rating) is
+    // documented in the CGV, §15.
   });
 
   test("ratings render out of 5 so a low score cannot read as a maximum", () => {

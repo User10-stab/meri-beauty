@@ -165,8 +165,11 @@ function send(t, toAddress) {
     serviceName: t.service,
     to: toAddress,
     // Pas de copie à contact@ : une relance groupée en déposerait une par
-    // cliente dans la boîte du salon. --copie pour la remettre.
+    // cliente dans la boîte du salon. --copie pour la remettre — forcée, car
+    // lancé à la main, NODE_ENV n'est pas « production » et sendEmail
+    // n'enverrait sinon jamais la copie.
     skipCc: !withCopy,
+    forceCc: withCopy,
   });
 }
 

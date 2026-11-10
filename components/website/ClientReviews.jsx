@@ -10,13 +10,13 @@ import { StarIcon } from "./icons";
  * a misleading commercial practice under Book VI of the Belgian Code de droit
  * économique. Nothing renders until real reviews exist.
  *
- * Every review is shown, with or without a written comment. Visitors can
- * narrow the list by type, rating and prestation; the default view is all
- * reviews, newest-first, with no selection on the rating.
+ * Every review is shown, with or without a written comment. Tabs split them
+ * by type (prestations, ateliers & événements, formations); the default tab
+ * shows all of them, newest-first, with no selection on the rating.
  */
 
 const TYPE_LABELS = {
-  APPOINTMENT: "Rendez-vous",
+  APPOINTMENT: "Prestations",
   WORKSHOP: "Ateliers & événements",
   FORMATION: "Formations",
 };
@@ -61,8 +61,6 @@ export default function ClientReviews({ reviews = [] }) {
   const [carouselRef, carouselInView] = useInView();
   const [currentIndex, setCurrentIndex] = useState(0);
   const [typeFilter, setTypeFilter] = useState("ALL");
-  const [ratingFilter, setRatingFilter] = useState("ALL");
-  const [serviceFilter, setServiceFilter] = useState("ALL");
   const intervalRef = useRef(null);
 
   const typeCounts = useMemo(() => {
@@ -70,53 +68,20 @@ export default function ClientReviews({ reviews = [] }) {
     for (const r of reviews) counts[r.type] = (counts[r.type] ?? 0) + 1;
     return counts;
   }, [reviews]);
-  const availableTypes = TYPE_ORDER.filter((t) => typeCounts[t]);
 
-  const byType = useMemo(
+  const filtered = useMemo(
     () => (typeFilter === "ALL" ? reviews : reviews.filter((r) => r.type === typeFilter)),
     [reviews, typeFilter]
-  );
-  const services = useMemo(
-    () =>
-      [...new Set(byType.map((r) => r.service).filter(Boolean))].sort((a, b) =>
-        a.localeCompare(b, "fr")
-      ),
-    [byType]
-  );
-  const filtered = useMemo(
-    () =>
-      byType.filter(
-        (r) =>
-          (ratingFilter === "ALL" || r.rating === Number(ratingFilter)) &&
-          (serviceFilter === "ALL" || r.service === serviceFilter)
-      ),
-    [byType, ratingFilter, serviceFilter]
   );
   const average = filtered.length
     ? filtered.reduce((sum, r) => sum + r.rating, 0) / filtered.length
     : 0;
 
   const totalSlides = Math.max(1, Math.ceil(filtered.length / 3));
-  const isFiltered = typeFilter !== "ALL" || ratingFilter !== "ALL" || serviceFilter !== "ALL";
 
-  // Filters always restart from the first slide.
+  // A new tab always starts from the first slide.
   const chooseType = (type) => {
     setTypeFilter(type);
-    setServiceFilter("ALL"); // a prestation belongs to one type
-    setCurrentIndex(0);
-  };
-  const chooseRating = (value) => {
-    setRatingFilter(value);
-    setCurrentIndex(0);
-  };
-  const chooseService = (value) => {
-    setServiceFilter(value);
-    setCurrentIndex(0);
-  };
-  const resetFilters = () => {
-    setTypeFilter("ALL");
-    setRatingFilter("ALL");
-    setServiceFilter("ALL");
     setCurrentIndex(0);
   };
 
@@ -175,62 +140,37 @@ export default function ClientReviews({ reviews = [] }) {
               genuine whenever a trader displays them. */}
           <p className="mx-auto max-w-2xl text-[13px] leading-relaxed text-ink/50">
             Tous les avis ci-dessous ont été déposés par des personnes
-            ayant réellement effectué un rendez-vous, un atelier ou une formation au salon. Ils sont affichés
-            du plus récent au plus ancien, sans sélection sur la note, avec ou sans
-            commentaire.
+            ayant réellement effectué un rendez-vous, un atelier ou une formation au salon.
           </p>
         </div>
 
-        {/* Filters — the visitor's choice; the default view is every review. */}
+        {/* Tabs by type — « Tous » by default, so every review is shown. */}
         <div className="mb-10 flex flex-col items-center gap-5">
-          <div className="flex items-center gap-2 text-ink">
-            <StarIcon aria-hidden="true" className="h-4 w-4 text-gold" />
-            <span className="text-[15px] font-semibold">
-              {filtered.length ? average.toFixed(1).replace(".", ",") : "–"}
-            </span>
-            <span className="text-[13px] text-ink/50">
-              · {filtered.length} avis{isFiltered ? ` sur ${reviews.length}` : ""}
-            </span>
+          <div className="flex flex-wrap justify-center gap-2" role="tablist" aria-label="Type de prestation">
+            <TypeTab active={typeFilter === "ALL"} onClick={() => chooseType("ALL")} count={reviews.length}>
+              Tous
+            </TypeTab>
+            {TYPE_ORDER.map((type) => (
+              <TypeTab
+                key={type}
+                active={typeFilter === type}
+                onClick={() => chooseType(type)}
+                count={typeCounts[type] ?? 0}
+              >
+                {TYPE_LABELS[type]}
+              </TypeTab>
+            ))}
           </div>
 
-          {availableTypes.length > 1 ? (
-            <div className="flex flex-wrap justify-center gap-2" role="group" aria-label="Type de prestation">
-              <FilterPill active={typeFilter === "ALL"} onClick={() => chooseType("ALL")}>
-                Tous <span className="opacity-60">{reviews.length}</span>
-              </FilterPill>
-              {availableTypes.map((type) => (
-                <FilterPill key={type} active={typeFilter === type} onClick={() => chooseType(type)}>
-                  {TYPE_LABELS[type]} <span className="opacity-60">{typeCounts[type]}</span>
-                </FilterPill>
-              ))}
+          {filtered.length ? (
+            <div className="flex items-center gap-2 text-ink">
+              <StarIcon aria-hidden="true" className="h-4 w-4 text-gold" />
+              <span className="text-[15px] font-semibold">
+                {average.toFixed(1).replace(".", ",")}
+              </span>
+              <span className="text-[13px] text-ink/50">· {filtered.length} avis</span>
             </div>
           ) : null}
-
-          <div className="flex w-full flex-col justify-center gap-3 sm:w-auto sm:flex-row">
-            <FilterSelect
-              label="Note"
-              value={ratingFilter}
-              onChange={chooseRating}
-              options={[
-                { value: "ALL", label: "Toutes les notes" },
-                ...[5, 4, 3, 2, 1].map((n) => ({
-                  value: String(n),
-                  label: `${n} étoile${n > 1 ? "s" : ""} (${byType.filter((r) => r.rating === n).length})`,
-                })),
-              ]}
-            />
-            {services.length > 1 ? (
-              <FilterSelect
-                label="Prestation"
-                value={serviceFilter}
-                onChange={chooseService}
-                options={[
-                  { value: "ALL", label: "Toutes les prestations" },
-                  ...services.map((name) => ({ value: name, label: name })),
-                ]}
-              />
-            ) : null}
-          </div>
         </div>
 
         {/* Carousel */}
@@ -263,10 +203,10 @@ export default function ClientReviews({ reviews = [] }) {
 
           {filtered.length === 0 ? (
             <div className="rounded-2xl bg-white p-10 text-center shadow-sm shadow-black/5">
-              <p className="text-[14px] text-ink/60">Aucun avis ne correspond à ces filtres.</p>
+              <p className="text-[14px] text-ink/60">Pas encore d'avis dans cette catégorie.</p>
               <button
                 type="button"
-                onClick={resetFilters}
+                onClick={() => chooseType("ALL")}
                 className="mt-4 text-[13px] font-semibold text-gold underline-offset-4 hover:underline"
               >
                 Voir tous les avis
@@ -347,38 +287,27 @@ function ReviewCard({ review }) {
   );
 }
 
-function FilterPill({ active, onClick, children }) {
+function TypeTab({ active, onClick, count, children }) {
   return (
     <button
       type="button"
+      role="tab"
+      aria-selected={active}
       onClick={onClick}
-      aria-pressed={active}
-      className={`rounded-full px-4 py-2 text-[13px] font-medium transition-colors ${
+      className={`inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-[13px] font-medium transition-colors ${
         active
           ? "bg-ink text-white"
           : "bg-white text-ink/70 shadow-sm shadow-black/5 hover:text-ink"
       }`}
     >
       {children}
-    </button>
-  );
-}
-
-function FilterSelect({ label, value, onChange, options }) {
-  return (
-    <label className="flex items-center gap-2 text-[12px] font-medium uppercase tracking-[0.12em] text-ink/50">
-      <span className="sr-only sm:not-sr-only">{label}</span>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-full border border-black/10 bg-white px-4 py-2 text-[13px] normal-case tracking-normal text-ink focus:border-gold focus:outline-none sm:w-auto"
+      <span
+        className={`rounded-full px-2 py-0.5 text-[11px] ${
+          active ? "bg-white/15 text-white" : "bg-cream text-ink/60"
+        }`}
       >
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-    </label>
+        {count}
+      </span>
+    </button>
   );
 }

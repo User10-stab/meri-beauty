@@ -226,7 +226,9 @@ export default function CGVPage() {
       </P>
       <P>
         Les avis sont affichés du plus récent au plus ancien, sans sélection ni tri fondés sur la
-        note attribuée. Seuls le prénom et l'initiale du nom de famille sont affichés. Meri
+        note attribuée, avec ou sans commentaire écrit. Le visiteur peut, s'il le souhaite,
+        filtrer l'affichage par type de prestation, par note ou par prestation ; par défaut,
+        l'ensemble des avis est présenté. Seuls le prénom et l'initiale du nom de famille sont affichés. Meri
         Beauty se réserve le droit de retirer un avis dont le contenu est illicite, injurieux,
         diffamatoire, hors sujet ou attentatoire à la vie privée d'un tiers — jamais au seul
         motif qu'il serait défavorable.

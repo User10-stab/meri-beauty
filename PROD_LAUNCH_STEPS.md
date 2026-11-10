@@ -46,7 +46,7 @@ file is the sequence.
 ## Step 3 — Verify/lock down prod config on the VPS
 
 8. [ ] Re-check every env var is a **real prod value**, not a dev leftover:
-       `AUTH_SECRET`, `CRON_SECRET`, `RESEND_API_KEY`, and
+       `AUTH_SECRET`, `CRON_SECRET`, the [OVH SMTP settings](VPS_OPERATIONS_GUIDE.md#ovh-smtp), and
        `NEXT_PUBLIC_APP_URL=https://meribeautystudio.com` (this one matters a lot now
        that the real domain is live — wrong value here breaks sitemap/canonical URLs
        silently).
@@ -83,7 +83,7 @@ file is the sequence.
 13. [ ] With the gate still up, walk through the full flows yourself end-to-end:
         booking an appointment, a boutique checkout (Stripe test mode is fine for this
         if step 9 hasn't flipped to live yet), an admin refund, a formation/atelier
-        reservation, and confirm reminder emails actually send (Resend).
+        reservation, and confirm reminder emails arrive via OVH SMTP.
 14. [ ] Spot-check the remaining unverified HIGH items from
         `SECURITY_FIXES_SPEC.md`: refund-amount cap behavior, refund-failure handling,
         cancel-vs-webhook race, Mondial Relay pickup-point validation. (Listed in

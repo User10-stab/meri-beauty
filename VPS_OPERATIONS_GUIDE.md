@@ -54,7 +54,7 @@ Stripe, base de données, Sentry, etc.) et doit le rester.
 Point important à connaître, il évite des rebuilds inutiles :
 
 - **Variables serveur uniquement** (`STRIPE_SECRET_KEY`,
-  `STRIPE_WEBHOOK_SECRET`, `SENTRY_DSN`, `DATABASE_URL`, `RESEND_API_KEY`...) :
+  `STRIPE_WEBHOOK_SECRET`, `SENTRY_DSN`, `DATABASE_URL`, `SMTP_PASSWORD`...) :
   lues en direct par le serveur à chaque requête. Un simple
   `pm2 restart meribeauty --update-env` suffit après les avoir modifiées —
   **pas besoin de rebuild**.
@@ -63,6 +63,30 @@ Point important à connaître, il évite des rebuilds inutiles :
   code envoyé au navigateur au moment du `npm run build`. Les modifier
   **nécessite un vrai rebuild** (Section 3) pour que le changement soit
   visible côté client.
+
+---
+
+### OVH SMTP
+
+Renseigner ces variables dans le fichier `.env` privé du VPS avant de déployer
+la version qui utilise SMTP :
+
+```dotenv
+EMAIL_PROVIDER=smtp
+SMTP_HOST=smtp.mail.ovh.net
+SMTP_PORT=465
+SMTP_USER=contact@meribeautystudio.com
+SMTP_PASSWORD="<mot de passe de la boîte OVH>"
+```
+
+Le port 465 utilise TLS dès la connexion. Le nom d'expéditeur est « Meri Beauty »
+et l'adresse d'expédition est celle de `SMTP_USER`. Si `EMAIL_FROM` est défini,
+il doit correspondre à une adresse autorisée pour cette boîte.
+
+Remplacer toute ancienne valeur `EMAIL_PROVIDER=resend` et retirer
+`RESEND_API_KEY` après la bascule. `EMAIL_DAILY_LIMIT` règle le budget journalier
+utilisé par les campagnes et les demandes d'avis (100 par défaut). Après le
+déploiement, vérifier la réception avec un compte de test.
 
 ---
 

@@ -46,7 +46,7 @@ variable it needs and what it's for:
 | `ADMIN_PASSWORD` | Used only by the seed script (step 4) to create the initial admin login. |
 | `CRON_SECRET` | Bearer token for manually hitting `/api/cron` and `/api/cron/appointments`. Not required for the app to run — the in-process scheduler in `lib/background-jobs.js` runs regardless. Only needed if you want to call those routes yourself. |
 | `NEXT_PUBLIC_APP_URL` | `http://localhost:3000` locally — used for sitemap/canonical URLs. |
-| `RESEND_API_KEY` | Transactional email (reminders, confirmations). Use a Resend test/dev key. |
+| `EMAIL_PROVIDER=mailpit` | Capture local email in Mailpit. See [Mailpit setup](MAILPIT_E2E.md). |
 | `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET` | Use **test-mode** (`sk_test_...`/`pk_test_...`) Stripe keys locally. For the webhook secret, run `stripe listen --forward-to localhost:3000/api/webhooks/stripe` (Stripe CLI) — it prints a `whsec_...` secret to use here. |
 | `MONDIAL_RELAY_*`, `NEXT_PUBLIC_MONDIAL_RELAY_BRAND_ID` | Shipping integration — use Mondial Relay's sandbox credentials for local dev. |
 | `INSTA_API` | Instagram feed integration. |

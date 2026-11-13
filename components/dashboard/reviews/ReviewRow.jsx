@@ -35,7 +35,7 @@ export function ReviewRow({ row, onDelete }) {
         <div className="text-sm text-dark dark:text-white">{row.staffName || "—"}</div>
       </td>
       <td className="px-6 py-4">
-        <div className="max-w-xs truncate text-sm text-gray-600 dark:text-dark-6">
+        <div className="min-w-[220px] max-w-md whitespace-pre-line break-words text-sm text-gray-600 dark:text-dark-6">
           {row.comment || "—"}
         </div>
       </td>

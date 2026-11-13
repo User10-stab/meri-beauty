@@ -12,16 +12,45 @@ concurrency:
   group: deploy-master
   cancel-in-progress: false
 
+# Lint, tests and build run as three parallel jobs: the deploy waits for the
+# slowest one (the build) instead of the sum of all three.
 jobs:
-  ci:
-    name: CI
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
     env:
-     DATABASE_URL: ${{ secrets.DATABASE_URL }}
-     STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+      # prisma.config.js reads DATABASE_URL eagerly, even for the
+      # `prisma generate` run by postinstall. No connection is ever opened.
+      DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci?schema=public"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # postinstall already runs `prisma generate`.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+  test:
+    name: Critical tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # test:critical is meant to be fast/mocked, but at least one contract
+      # test (staff-anniversary-billing) makes an unmocked Prisma call — a
+      # placeholder keeps CI from ever touching a real database, same
+      # reasoning as deploy-staging.yml's own gate.
+      DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci?schema=public"
+      STRIPE_SECRET_KEY: "sk_test_ci_placeholder"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -35,29 +64,45 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Prisma generate
-        run: npx prisma generate
-
-      - name: Lint
-        run: npm run lint
-
       - name: Run critical tests
-        env:
-          # Deliberately overrides the job-level real secrets above for this
-          # step only. test:critical is meant to be fast/mocked, but at least
-          # one contract test (staff-anniversary-billing) makes an unmocked
-          # Prisma call — a placeholder keeps CI from ever touching a real
-          # database, same reasoning as deploy-staging.yml's own gate.
-          DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci?schema=public"
-          STRIPE_SECRET_KEY: "sk_test_ci_placeholder"
         run: npm run test:critical
+
+  build:
+    name: Production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Reuses Next's incremental compiler cache between runs.
+      - name: Restore Next.js build cache
+        uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ github.sha }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
+            nextjs-${{ runner.os }}-
 
       - name: Production build
         run: npm run build
 
   deploy:
     name: Deploy to VPS
-    needs: ci
+    needs: [lint, test, build]
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -69,6 +114,7 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: 22
+          command_timeout: 15m
           script: |
             set -e
 
@@ -80,8 +126,20 @@ jobs:
             git checkout master
             git pull origin master
 
-            echo ">>> Installing dependencies..."
-            npm ci
+            # `npm ci` wipes node_modules and reinstalls ~800 packages (~3 min
+            # on this VPS). Only do it when the dependencies (or Node itself)
+            # changed since the last SUCCESSFUL install. The marker is written
+            # only after npm ci succeeds, so a failed/interrupted install is
+            # always retried on the next deploy.
+            DEPS_MARKER=node_modules/.deploy-deps-hash
+            DEPS_HASH=$(cat package.json package-lock.json | sha256sum | cut -d' ' -f1)-$(node -v)
+            if [ "$(cat "$DEPS_MARKER" 2>/dev/null)" != "$DEPS_HASH" ]; then
+              echo ">>> Dependencies changed: installing..."
+              npm ci
+              echo "$DEPS_HASH" > "$DEPS_MARKER"
+            else
+              echo ">>> Dependencies unchanged: skipping npm ci."
+            fi
 
             echo ">>> Generating Prisma Client..."
             npx prisma generate
